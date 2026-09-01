@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Subir relato — {{ caso['rotulo'] }}{% endblock %}
+{% block app_class %} narrow{% endblock %}
+{% block content %}
+
+<h1 style="font-size:22px; margin-bottom:8px;">Cuéntanos qué está pasando</h1>
+<p style="color:var(--ink-muted); font-size:13.5px; margin-bottom:20px;">
+  Estás subiendo tu relato al caso <strong>{{ caso['rotulo'] }}</strong>. Solo lo verá la persona encargada de revisarlo — no verás ni compartirás los relatos de otras personas.
+</p>
+
+<form class="card" style="padding:24px;" method="post" enctype="multipart/form-data" id="relato-form">
+  <div class="field">
+    <label for="nombre">Tu nombre</label>
+    <input type="text" id="nombre" name="nombre" required>
+  </div>
+
+  <div class="field">
+    <label>¿Cómo quieres entregar tu relato?</label>
+    <div class="method-switch">
+      <button type="button" class="method-btn active" id="m-texto">Escribirlo o pegarlo</button>
+      <button type="button" class="method-btn" id="m-archivo">Subir un archivo</button>
+    </div>
+  </div>
+
+  <input type="hidden" name="metodo" id="metodo" value="texto">
+
+  <div class="field" id="campo-texto">
+    <label for="relato">Tu relato</label>
+    <textarea id="relato" name="relato" placeholder="Escribe aquí tu relato transcrito, o pega el texto de tu correo…"></textarea>
+  </div>
+
+  <div class="field" id="campo-archivo" style="display:none;">
+    <label for="archivo">Archivo (.docx, .pdf o .txt)</label>
+    <input type="file" id="archivo" name="archivo" accept=".txt,.docx,.pdf">
+    <div class="hint">Word, PDF o texto plano — como hayas transcrito tu relato.</div>
+  </div>
+
+  <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Enviar relato</button>
+</form>
+
+<script>
+  var mTexto = document.getElementById('m-texto');
+  var mArchivo = document.getElementById('m-archivo');
+  var campoTexto = document.getElementById('campo-texto');
+  var campoArchivo = document.getElementById('campo-archivo');
+  var metodo = document.getElementById('metodo');
+
+  function setMetodo(m){
+    metodo.value = m;
+    mTexto.classList.toggle('active', m === 'texto');
+    mArchivo.classList.toggle('active', m === 'archivo');
+    campoTexto.style.display = m === 'texto' ? '' : 'none';
+    campoArchivo.style.display = m === 'archivo' ? '' : 'none';
+  }
+  mTexto.addEventListener('click', function(){ setMetodo('texto'); });
+  mArchivo.addEventListener('click', function(){ setMetodo('archivo'); });
+</script>
+{% endblock %}

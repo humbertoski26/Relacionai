@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Relato recibido — {{ caso['rotulo'] }}{% endblock %}
+{% block app_class %} narrow{% endblock %}
+{% block content %}
+<div class="card" style="padding:28px; text-align:center;">
+  <div style="font-size:32px; margin-bottom:10px;">✓</div>
+  <h1 style="font-size:20px; margin-bottom:10px;">Gracias, {{ nombre }}</h1>
+  <p style="color:var(--ink-muted); font-size:13.5px;">
+    Tu relato quedó registrado en el caso <strong>{{ caso['rotulo'] }}</strong>. La persona encargada lo revisará junto con el resto de los antecedentes.
+  </p>
+</div>
+{% endblock %}
