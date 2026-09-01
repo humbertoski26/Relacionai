@@ -8,10 +8,19 @@
   Estás subiendo tu relato al caso <strong>{{ caso['rotulo'] }}</strong>. Solo lo verá la persona encargada de revisarlo — no verás ni compartirás los relatos de otras personas.
 </p>
 
+{% if caso['fecha_limite'] %}
+<div class="flash flash-ok" style="margin-bottom:16px;">Por favor completa tu relato antes del <strong>{{ caso['fecha_limite'] }}</strong>.</div>
+{% endif %}
+
 <form class="card" style="padding:24px;" method="post" enctype="multipart/form-data" id="relato-form">
   <div class="field">
     <label for="nombre">Tu nombre</label>
     <input type="text" id="nombre" name="nombre" required>
+  </div>
+
+  <div class="field">
+    <label for="correo">Tu correo (opcional)</label>
+    <input type="text" id="correo" name="correo" placeholder="para enviarte una copia de tu relato">
   </div>
 
   <div class="field">

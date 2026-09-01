@@ -25,6 +25,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import models
 from claude_client import resumir_relato, sintetizar_caso
+from email_client import enviar_copia_relato, enviar_invitacion, enviar_recordatorio
 from extract import ExtractError, extraer_texto
 from report_pdf import construir_informe_pdf
 
@@ -162,14 +163,68 @@ def encargado_caso(rotulo):
         abort(404)
     relatos = models.listar_relatos(rotulo)
     historial = models.listar_historial(rotulo)
+    destinatarios = models.listar_destinatarios(rotulo)
     return render_template(
         "encargado_caso.html",
-        caso=caso, relatos=relatos, historial=historial,
+        caso=caso, relatos=relatos, historial=historial, destinatarios=destinatarios,
         problemas=models.problemas_de(caso), soluciones=models.soluciones_de(caso),
         link_publico=link_publico(rotulo),
         link_whatsapp=link_whatsapp(rotulo, caso["apellido"]),
         link_correo=link_correo(rotulo, caso["apellido"]),
+        hoy=datetime.now().strftime("%Y-%m-%d"),
     )
+
+
+@app.route("/encargado/casos/<rotulo>/plazo", methods=["POST"])
+@login_requerido
+def encargado_set_plazo(rotulo):
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    fecha_limite = (request.form.get("fecha_limite") or "").strip()
+    models.set_fecha_limite(rotulo, fecha_limite)
+    flash("Fecha límite actualizada." if fecha_limite else "Se quitó la fecha límite.", "ok")
+    return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+
+@app.route("/encargado/casos/<rotulo>/destinatarios", methods=["POST"])
+@login_requerido
+def encargado_agregar_destinatarios(rotulo):
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    crudo = request.form.get("emails") or ""
+    emails = [e.strip() for e in crudo.replace(",", "\n").splitlines()]
+    nuevos = models.agregar_destinatarios(rotulo, emails)
+    if not nuevos:
+        flash("No se agregó ningún correo nuevo (revisa que estén bien escritos, o si ya estaban invitados).", "error")
+        return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+    link = link_publico(rotulo)
+    enviados = 0
+    for d in nuevos:
+        if enviar_invitacion(d["email"], rotulo, link, caso["fecha_limite"] or ""):
+            models.registrar_recordatorio_enviado(d["id"])
+            enviados += 1
+    flash(f"Se agregaron {len(nuevos)} destinatario(s)." + (f" Se envió la invitación por correo a {enviados}." if enviados else " No se pudo enviar el correo automático — revisa la configuración de SMTP; puedes compartir el link manualmente."), "ok")
+    return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+
+@app.route("/encargado/casos/<rotulo>/destinatarios/<int:destinatario_id>/recordar", methods=["POST"])
+@login_requerido
+def encargado_recordar_destinatario(rotulo, destinatario_id):
+    caso = models.obtener_caso(rotulo)
+    d = models.obtener_destinatario(destinatario_id)
+    if not caso or not d or d["caso_id"] != caso["id"]:
+        abort(404)
+    ok = enviar_recordatorio(d["email"], rotulo, link_publico(rotulo), caso["fecha_limite"] or "")
+    if ok:
+        models.registrar_recordatorio_enviado(destinatario_id)
+        models.registrar_historial(rotulo, actor="Encargado de convivencia", accion=f"Envió un recordatorio manual a {d['email']}.")
+        flash(f"Recordatorio enviado a {d['email']}.", "ok")
+    else:
+        flash("No se pudo enviar el recordatorio — revisa la configuración de SMTP.", "error")
+    return redirect(url_for("encargado_caso", rotulo=rotulo))
 
 
 @app.route("/encargado/casos/<rotulo>/sintetizar", methods=["POST"])
@@ -229,6 +284,7 @@ def caso_publico_enviar(rotulo):
         return render_template("publico_no_encontrado.html"), 404
 
     nombre = (request.form.get("nombre") or "").strip()
+    correo = (request.form.get("correo") or "").strip()
     metodo = request.form.get("metodo") or "texto"
     if not nombre:
         flash("Por favor indica tu nombre.", "error")
@@ -252,10 +308,33 @@ def caso_publico_enviar(rotulo):
         formato = "texto"
         archivo_original = None
 
-    relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido)
+    relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido, correo_persona=correo)
     _procesar_pipeline(rotulo, relato_id, contenido)
 
-    return render_template("publico_gracias.html", caso=caso, nombre=nombre)
+    copia_enviada = False
+    if correo:
+        copia_enviada = enviar_copia_relato(correo, nombre, rotulo, contenido)
+
+    return render_template("publico_gracias.html", caso=caso, nombre=nombre, copia_enviada=copia_enviada, correo=correo)
+
+
+# --- job diario de recordatorios (llamado por un Render Cron Job) -----
+
+@app.route("/tasks/recordatorios", methods=["POST"])
+def tarea_recordatorios():
+    secreto_esperado = os.environ.get("TASKS_SECRET")
+    if not secreto_esperado or request.headers.get("X-Tasks-Secret") != secreto_esperado:
+        abort(403)
+
+    pendientes = models.destinatarios_para_recordar()
+    enviados = 0
+    for d in pendientes:
+        ok = enviar_recordatorio(d["email"], d["caso_rotulo"], link_publico(d["caso_rotulo"]), d["caso_fecha_limite"] or "")
+        if ok:
+            models.registrar_recordatorio_enviado(d["id"])
+            models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
+            enviados += 1
+    return {"revisados": len(pendientes), "enviados": enviados}, 200
 
 
 if __name__ == "__main__":

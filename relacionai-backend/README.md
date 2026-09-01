@@ -12,19 +12,29 @@ en un informe descargable para el encargado de convivencia.
    **rótulo único** (`APELLIDO-FECHA-CÓDIGO`, ej. `GARRIDO-20260901-YT0A`) y un
    link público para ese caso.
 2. El encargado comparte ese link con las personas que estime conveniente —
-   con un botón que abre WhatsApp con el mensaje y el link ya escritos, y otro
-   que abre el correo con el mismo mensaje. El envío mismo lo hace el
-   encargado desde su propio WhatsApp/correo; la plataforma no manda mensajes
-   por sí sola.
-3. Cada persona entra al link, escribe su nombre y sube su relato — como texto
+   con un botón que abre WhatsApp con el mensaje y el link ya escritos, otro
+   que abre el correo con el mismo mensaje, y un botón **"Copiar link"** para
+   pegarlo donde quiera. El envío manual lo hace el encargado desde su propio
+   WhatsApp/correo; la plataforma no manda mensajes por sí sola en ese caso.
+   Además, el encargado puede fijar una **fecha máxima de entrega** para el
+   caso (se muestra a las personas al entrar a subir su relato).
+3. También puede agregar una lista de **destinatarios** (correos) directamente
+   en el panel: a cada uno se le envía automáticamente el link de invitación
+   por correo (si el envío de correo está configurado — ver más abajo), y
+   quedan en una lista de seguimiento con su estado (pendiente / completado).
+   El encargado puede recordarles manualmente con un botón, y además hay una
+   tarea diaria automática que les reenvía un recordatorio si aún no
+   completan su relato (ver "Recordatorios automáticos" más abajo).
+4. Cada persona entra al link, escribe su nombre, opcionalmente su correo (para
+   recibir una copia de su propio relato), y sube su relato — como texto
    pegado, o como archivo `.docx`, `.pdf` o `.txt`. No ve los relatos de las
    demás personas.
-4. Apenas llega un relato: Claude genera un **resumen individual**, y luego
+5. Apenas llega un relato: Claude genera un **resumen individual**, y luego
    se recalcula automáticamente la **síntesis general del caso** (combinando
    todos los relatos recibidos hasta ese momento), identificando problemas,
    una interpretación y posibles soluciones. Todo queda registrado con hora
    y quién lo hizo en el **historial** del caso.
-5. El encargado descarga en cualquier momento el **informe final en PDF** con
+6. El encargado descarga en cualquier momento el **informe final en PDF** con
    la síntesis, los problemas, la interpretación, las soluciones y el listado
    de relatos incluidos.
 
@@ -58,6 +68,22 @@ Abre `http://localhost:5050/encargado` con la contraseña que hayas definido.
 | `ANTHROPIC_API_KEY` | **Necesaria** para que Claude genere los resúmenes y la síntesis. Se obtiene en [console.anthropic.com](https://console.anthropic.com) — es distinta de tu cuenta de claude.ai. Sin ella, la plataforma funciona igual (recibe relatos, arma el historial, genera el PDF) pero la síntesis queda marcada como "pendiente de configuración". |
 | `CLAUDE_MODEL` | Modelo de Claude a usar (por defecto `claude-sonnet-4-5`). Revisa el listado vigente en la [documentación de modelos](https://docs.claude.com/en/docs/about-claude/models). |
 | `PORT` | Puerto del servidor. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` | Opcionales. Si se configuran, la plataforma envía automáticamente: copia del relato a quien lo sube (si dejó su correo), invitación a cada destinatario agregado, y recordatorios. Sin ellas, todo lo demás sigue funcionando igual — solo no se manda ningún correo (se puede seguir compartiendo el link manualmente). Sirve con Gmail (contraseña de aplicación) o cualquier proveedor SMTP transaccional (Resend, SendGrid, Mailgun, etc.). |
+| `TASKS_SECRET` | Opcional. Clave para proteger la ruta `POST /tasks/recordatorios` (recordatorios automáticos diarios) — ver la sección de abajo. |
+
+### Recordatorios automáticos
+
+La ruta `POST /tasks/recordatorios` revisa todos los casos con fecha límite
+vigente y le reenvía un correo a cada destinatario que aún no ha completado
+su relato (como máximo cada 20 horas por persona, para no saturar). Requiere
+el header `X-Tasks-Secret` con el valor de `TASKS_SECRET` — sin ese header
+(o con uno incorrecto) responde `403`.
+
+Para que se dispare sola todos los días, hay que programar algo externo que
+llame a esa ruta — por ejemplo un **Cron Job de Render** apuntando a
+`https://tu-dominio/tasks/recordatorios` con ese header. No se puede correr
+como un proceso Python aparte porque necesita la misma base de datos SQLite
+que usa el servidor web.
 
 ## Desplegarlo para que el link funcione de verdad
 

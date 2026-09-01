@@ -16,6 +16,7 @@
       Creado {{ caso['creado_en']|fecha }}
       {% if caso['nivel_urgencia'] %} · <span class="pill pill-{{ caso['nivel_urgencia'] }}">Urgencia {{ caso['nivel_urgencia'] }}</span>{% endif %}
       {% if caso['titulo'] %} · {{ caso['titulo'] }}{% endif %}
+      {% if caso['fecha_limite'] %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
     </p>
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -31,12 +32,75 @@
 <div class="section card" style="padding:20px;">
   <h3>Compartir este caso</h3>
   <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Envía este link a las personas involucradas para que suban su propio relato a esta misma carpeta.</p>
-  <code class="linkbox">{{ link_publico }}</code>
+  <code class="linkbox" id="link-caso">{{ link_publico }}</code>
   <div class="share-row" style="margin-top:12px;">
-    <a class="btn btn-wa" href="{{ link_whatsapp }}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
+    <button type="button" class="btn btn-ghost" id="btn-copiar-link" data-link="{{ link_publico }}">Copiar link</button>
+    <a class="btn btn-wa" href="https://wa.me/?text={{ (link_publico ~ ' — registra tu relato en el caso ' ~ caso['rotulo'])|urlencode }}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
     <a class="btn btn-mail" href="{{ link_correo }}">Enviar por correo</a>
   </div>
+
+  <form method="post" action="{{ url_for('encargado_set_plazo', rotulo=caso['rotulo']) }}" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+    <label for="fecha_limite" style="font-size:13px; font-weight:600;">Fecha máxima de entrega</label>
+    <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;">
+      <input type="date" id="fecha_limite" name="fecha_limite" value="{{ caso['fecha_limite'] or '' }}" style="max-width:180px;">
+      <button type="submit" class="btn btn-ghost">Guardar plazo</button>
+    </div>
+    <p style="font-size:12px; color:var(--ink-faint); margin-top:6px;">Se muestra a las personas cuando entran a subir su relato, y se incluye en las invitaciones y recordatorios por correo.</p>
+  </form>
 </div>
+
+<div class="section card" style="padding:20px;">
+  <h3>Destinatarios</h3>
+  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Agrega los correos de las personas que deben registrar su relato — se les envía el link automáticamente (si el correo está configurado) y quedan en la lista de seguimiento para recordatorios.</p>
+  <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}">
+    <textarea name="emails" rows="2" placeholder="uno o varios correos, separados por coma o por línea" style="width:100%; resize:vertical;"></textarea>
+    <button type="submit" class="btn btn-primary" style="margin-top:8px;">Agregar y enviar link</button>
+  </form>
+
+  {% if destinatarios %}
+  <div style="margin-top:16px; display:grid; gap:8px;">
+    {% for d in destinatarios %}
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; border-top:1px solid var(--border);">
+      <div>
+        <strong style="font-size:13.5px;">{{ d['email'] }}</strong>
+        <div style="font-size:12px; color:var(--ink-faint); margin-top:2px;">
+          {% if d['cumplido_en'] %}Completó su relato el {{ d['cumplido_en']|fecha }}{% else %}Invitado {{ d['invitado_en']|fecha }}{% if d['ultimo_recordatorio_en'] %} · último recordatorio {{ d['ultimo_recordatorio_en']|fecha }}{% endif %}{% endif %}
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pill {{ 'pill-bajo' if d['cumplido_en'] else 'pill-medio' }}">{{ 'Completado' if d['cumplido_en'] else 'Pendiente' }}</span>
+        {% if not d['cumplido_en'] %}
+        <form method="post" action="{{ url_for('encargado_recordar_destinatario', rotulo=caso['rotulo'], destinatario_id=d['id']) }}">
+          <button type="submit" class="btn btn-ghost" style="padding:5px 10px; font-size:12px;">Recordar ahora</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="font-size:13px; color:var(--ink-faint); margin-top:12px;">Aún no agregas destinatarios.</p>
+  {% endif %}
+</div>
+
+<script>
+  var btnCopiar = document.getElementById('btn-copiar-link');
+  if (btnCopiar) {
+    btnCopiar.addEventListener('click', function () {
+      var link = btnCopiar.getAttribute('data-link');
+      var listo = function () {
+        var original = btnCopiar.textContent;
+        btnCopiar.textContent = 'Link copiado ✓';
+        setTimeout(function () { btnCopiar.textContent = original; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(listo).catch(function () { window.prompt('Copia el link:', link); });
+      } else {
+        window.prompt('Copia el link:', link);
+      }
+    });
+  }
+</script>
 
 {% if caso['sintesis_general'] %}
 <div class="section">

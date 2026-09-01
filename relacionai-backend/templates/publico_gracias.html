@@ -8,5 +8,10 @@
   <p style="color:var(--ink-muted); font-size:13.5px;">
     Tu relato quedó registrado en el caso <strong>{{ caso['rotulo'] }}</strong>. La persona encargada lo revisará junto con el resto de los antecedentes.
   </p>
+  {% if correo %}
+  <p style="color:var(--ink-muted); font-size:12.5px; margin-top:10px;">
+    {% if copia_enviada %}Te enviamos una copia de tu relato a {{ correo }}.{% else %}Intentamos enviarte una copia a {{ correo }}, pero no se pudo — no te preocupes, tu relato igual quedó guardado.{% endif %}
+  </p>
+  {% endif %}
 </div>
 {% endblock %}

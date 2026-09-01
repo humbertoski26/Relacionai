@@ -1,15 +1,19 @@
 """
 Capa de datos de Relacionai.
 
-Un SQLite por despliegue (archivo en data/relacionai.db). Tres tablas:
+Un SQLite por despliegue (archivo en data/relacionai.db). Cuatro tablas:
 
 - casos: una "carpeta" por caso, rotulada con el apellido y la fecha de
-  creación. Guarda la síntesis general una vez calculada.
+  creación. Guarda la síntesis general una vez calculada, y opcionalmente
+  una fecha límite de entrega.
 - relatos: cada relato individual que llega a un caso (de la persona que
   lo vive, o de terceros a quienes el encargado les compartió el link).
+- destinatarios: personas a las que el encargado invitó por correo a subir
+  su relato a un caso — para poder recordarles automáticamente si no lo
+  han hecho.
 - historial: bitácora de todas las acciones sobre un caso (quién subió
   qué, cuándo se generó cada resumen/síntesis, cuándo se descargó el
-  informe), para trazabilidad.
+  informe, cuándo se envió cada recordatorio), para trazabilidad.
 """
 
 import json
@@ -38,7 +42,8 @@ CREATE TABLE IF NOT EXISTS casos (
     problemas_json TEXT,
     soluciones_json TEXT,
     nivel_urgencia TEXT,
-    sintesis_generada_en TEXT
+    sintesis_generada_en TEXT,
+    fecha_limite TEXT
 );
 
 CREATE TABLE IF NOT EXISTS relatos (
@@ -49,7 +54,18 @@ CREATE TABLE IF NOT EXISTS relatos (
     archivo_original TEXT,
     contenido TEXT NOT NULL,
     resumen TEXT,
-    subido_en TEXT NOT NULL
+    subido_en TEXT NOT NULL,
+    correo_persona TEXT
+);
+
+CREATE TABLE IF NOT EXISTS destinatarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    caso_id INTEGER NOT NULL REFERENCES casos(id),
+    email TEXT NOT NULL,
+    invitado_en TEXT NOT NULL,
+    ultimo_recordatorio_en TEXT,
+    relato_id INTEGER REFERENCES relatos(id),
+    cumplido_en TEXT
 );
 
 CREATE TABLE IF NOT EXISTS historial (
@@ -62,7 +78,16 @@ CREATE TABLE IF NOT EXISTS historial (
 
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
 CREATE INDEX IF NOT EXISTS idx_historial_caso ON historial(caso_id);
+CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
 """
+
+# Migración ligera: columnas agregadas después del primer despliegue.
+# ALTER TABLE ... ADD COLUMN es seguro de repetir (se salta si ya existe),
+# así una base de datos ya desplegada se pone al día sola al reiniciar.
+_MIGRATIONS = [
+    ("casos", "fecha_limite", "TEXT"),
+    ("relatos", "correo_persona", "TEXT"),
+]
 
 
 def now_iso():
@@ -85,6 +110,10 @@ def get_conn():
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        for tabla, columna, tipo in _MIGRATIONS:
+            columnas = {row["name"] for row in conn.execute(f"PRAGMA table_info({tabla})")}
+            if columna not in columnas:
+                conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
 
 
 def _slug_apellido(apellido: str) -> str:
@@ -121,6 +150,11 @@ def obtener_caso(rotulo: str):
         return conn.execute("SELECT * FROM casos WHERE rotulo = ?", (rotulo,)).fetchone()
 
 
+def obtener_caso_por_id(caso_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM casos WHERE id = ?", (caso_id,)).fetchone()
+
+
 def listar_casos():
     with get_conn() as conn:
         return conn.execute(
@@ -130,15 +164,25 @@ def listar_casos():
         ).fetchall()
 
 
-def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archivo_original, contenido: str):
+def set_fecha_limite(rotulo: str, fecha_limite: str):
+    """fecha_limite: fecha en formato YYYY-MM-DD, o cadena vacía/None para quitarla."""
+    with get_conn() as conn:
+        conn.execute("UPDATE casos SET fecha_limite = ? WHERE rotulo = ?", (fecha_limite or None, rotulo))
+    registrar_historial(
+        rotulo, actor="Encargado de convivencia",
+        accion=(f"Definió el {fecha_limite} como fecha máxima de entrega." if fecha_limite else "Quitó la fecha máxima de entrega."),
+    )
+
+
+def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archivo_original, contenido: str, correo_persona: str = ""):
     caso = obtener_caso(rotulo)
     if not caso:
         raise ValueError("caso_no_encontrado")
     with get_conn() as conn:
         conn.execute(
-            """INSERT INTO relatos (caso_id, nombre_persona, formato_entrada, archivo_original, contenido, subido_en)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (caso["id"], nombre_persona.strip(), formato_entrada, archivo_original, contenido, now_iso()),
+            """INSERT INTO relatos (caso_id, nombre_persona, formato_entrada, archivo_original, contenido, subido_en, correo_persona)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (caso["id"], nombre_persona.strip(), formato_entrada, archivo_original, contenido, now_iso(), (correo_persona or "").strip() or None),
         )
         relato_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     registrar_historial(
@@ -146,6 +190,8 @@ def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archi
         actor=nombre_persona.strip() or "Persona anónima",
         accion=f"Subió un relato ({formato_entrada}).",
     )
+    if correo_persona:
+        _marcar_destinatario_cumplido(caso["id"], correo_persona, relato_id)
     return relato_id
 
 
@@ -208,3 +254,110 @@ def soluciones_de(caso) -> list:
         return json.loads(caso["soluciones_json"]) if caso["soluciones_json"] else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+# --------------------------------------------------------------- destinatarios
+
+def agregar_destinatarios(rotulo: str, emails: list) -> list:
+    """Agrega los correos nuevos (ignora los ya invitados en este caso). Devuelve las filas creadas."""
+    caso = obtener_caso(rotulo)
+    if not caso:
+        raise ValueError("caso_no_encontrado")
+    limpios = []
+    vistos = set()
+    for email in emails:
+        email = (email or "").strip().lower()
+        if email and email not in vistos and re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            vistos.add(email)
+            limpios.append(email)
+
+    creados = []
+    with get_conn() as conn:
+        existentes = {
+            row["email"] for row in conn.execute(
+                "SELECT email FROM destinatarios WHERE caso_id = ?", (caso["id"],)
+            )
+        }
+        for email in limpios:
+            if email in existentes:
+                continue
+            conn.execute(
+                "INSERT INTO destinatarios (caso_id, email, invitado_en) VALUES (?, ?, ?)",
+                (caso["id"], email, now_iso()),
+            )
+            row_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+            creados.append(conn.execute("SELECT * FROM destinatarios WHERE id = ?", (row_id,)).fetchone())
+
+    for d in creados:
+        registrar_historial(rotulo, actor="Encargado de convivencia", accion=f"Invitó a {d['email']} a subir su relato a este caso.")
+    return creados
+
+
+def listar_destinatarios(rotulo: str):
+    caso = obtener_caso(rotulo)
+    if not caso:
+        return []
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM destinatarios WHERE caso_id = ? ORDER BY invitado_en ASC", (caso["id"],)
+        ).fetchall()
+
+
+def obtener_destinatario(destinatario_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM destinatarios WHERE id = ?", (destinatario_id,)).fetchone()
+
+
+def _marcar_destinatario_cumplido(caso_id: int, email: str, relato_id: int):
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE destinatarios SET relato_id = ?, cumplido_en = ?
+               WHERE caso_id = ? AND email = ? AND cumplido_en IS NULL""",
+            (relato_id, now_iso(), caso_id, email),
+        )
+
+
+def registrar_recordatorio_enviado(destinatario_id: int):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE destinatarios SET ultimo_recordatorio_en = ? WHERE id = ?",
+            (now_iso(), destinatario_id),
+        )
+
+
+def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
+    """
+    Para el job diario de recordatorios: destinatarios que aún no completan su
+    relato, en casos abiertos con fecha límite futura, a quienes no se les ha
+    recordado en las últimas `min_horas_desde_ultimo` horas (o nunca).
+    Devuelve tuplas (destinatario_row, caso_row).
+    """
+    ahora = datetime.now(timezone.utc)
+    hoy = ahora.strftime("%Y-%m-%d")
+    resultado = []
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT d.*, c.rotulo AS caso_rotulo, c.fecha_limite AS caso_fecha_limite,
+                      c.apellido AS caso_apellido, c.estado AS caso_estado
+               FROM destinatarios d
+               JOIN casos c ON c.id = d.caso_id
+               WHERE d.cumplido_en IS NULL
+                 AND c.estado = 'abierto'
+                 AND c.fecha_limite IS NOT NULL
+                 AND c.fecha_limite >= ?"""
+            , (hoy,),
+        ).fetchall()
+    for row in filas:
+        if row["ultimo_recordatorio_en"]:
+            try:
+                ultimo = datetime.fromisoformat(row["ultimo_recordatorio_en"])
+                horas = (ahora - ultimo).total_seconds() / 3600
+                if horas < min_horas_desde_ultimo:
+                    continue
+            except ValueError:
+                pass
+        resultado.append(row)
+    return resultado
