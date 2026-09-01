@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Panel del encargado — Relacionai{% endblock %}
+{% block topnav %}
+<div class="topnav">
+  <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+</div>
+{% endblock %}
+{% block content %}
+
+{% set total = casos|length %}
+{% set abiertos = casos|selectattr('estado','equalto','abierto')|list|length %}
+{% set con_sintesis = casos|selectattr('sintesis_general')|list|length %}
+{% set urgentes = casos|selectattr('nivel_urgencia','equalto','alto')|list|length %}
+
+<div class="stat-row">
+  <div class="card stat"><div class="num">{{ total }}</div><div class="lbl">Casos totales</div></div>
+  <div class="card stat"><div class="num">{{ abiertos }}</div><div class="lbl">Abiertos</div></div>
+  <div class="card stat"><div class="num">{{ con_sintesis }}</div><div class="lbl">Con síntesis generada</div></div>
+  <div class="card stat"><div class="num" style="color:var(--danger);">{{ urgentes }}</div><div class="lbl">Urgencia alta</div></div>
+</div>
+
+<div class="card" style="padding:22px; margin-bottom:22px;">
+  <h2 style="font-size:15px; margin-bottom:14px;">Crear un caso nuevo</h2>
+  <form method="post" action="{{ url_for('encargado_crear_caso') }}" style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
+      <label for="apellido">Apellido</label>
+      <input type="text" id="apellido" name="apellido" required placeholder="Ej: Garrido">
+    </div>
+    <div class="field" style="margin-bottom:0; flex:2; min-width:240px;">
+      <label for="titulo">Nota interna (opcional)</label>
+      <input type="text" id="titulo" name="titulo" placeholder="Breve contexto del caso">
+    </div>
+    <button type="submit" class="btn btn-primary">Crear carpeta del caso</button>
+  </form>
+</div>
+
+<div class="card">
+  <table class="list">
+    <thead>
+      <tr><th>Rótulo</th><th>Apellido</th><th>Creado</th><th>Relatos</th><th>Urgencia</th><th>Estado</th></tr>
+    </thead>
+    <tbody>
+      {% for c in casos %}
+      <tr>
+        <td><a class="rotulo" href="{{ url_for('encargado_caso', rotulo=c['rotulo']) }}">{{ c['rotulo'] }}</a></td>
+        <td>{{ c['apellido'] }}</td>
+        <td>{{ c['creado_en']|fecha }}</td>
+        <td>{{ c['n_relatos'] }}</td>
+        <td>{% if c['nivel_urgencia'] %}<span class="pill pill-{{ c['nivel_urgencia'] }}">{{ c['nivel_urgencia'] }}</span>{% else %}—{% endif %}</td>
+        <td><span class="pill pill-{{ c['estado'] }}">{{ c['estado'] }}</span></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="text-align:center; color:var(--ink-faint); padding:26px;">Aún no hay casos creados.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

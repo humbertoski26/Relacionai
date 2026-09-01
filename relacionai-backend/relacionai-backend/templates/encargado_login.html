@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Ingreso encargado — Relacionai{% endblock %}
+{% block app_class %} narrow{% endblock %}
+{% block content %}
+<div class="card" style="padding:28px;">
+  <h1 style="font-size:21px; margin-bottom:6px;">Panel del encargado</h1>
+  <p style="color:var(--ink-muted); font-size:13.5px; margin-bottom:20px;">Ingresa la contraseña para revisar los casos.</p>
+  <form method="post">
+    <div class="field">
+      <label for="password">Contraseña</label>
+      <input type="password" id="password" name="password" autofocus required>
+    </div>
+    <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Entrar</button>
+  </form>
+</div>
+{% endblock %}
