@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Panel del encargado — Relacionai{% endblock %}
+{% block title %}Panel del encargado — RelacionAI{% endblock %}
 {% block topnav %}
 <div class="topnav">
-  <a href="{{ url_for('encargado_configuracion') }}">Configuración</a>
-  <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+  <a class="btn-icon" href="{{ url_for('encargado_configuracion') }}" title="Configuración" aria-label="Configuración">⚙</a>
+  <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>
 {% endblock %}
 {% block content %}

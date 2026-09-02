@@ -101,6 +101,11 @@ _MIGRATIONS = [
     ("casos", "pasos_reglamento_json", "TEXT"),
     ("configuracion", "reglamento_resumen", "TEXT"),
     ("configuracion", "reglamento_error", "TEXT"),
+    ("configuracion", "correo_encargado", "TEXT"),
+    ("casos", "informe_emitido_en", "TEXT"),
+    ("casos", "purgado_en", "TEXT"),
+    ("casos", "n_relatos_purgado", "INTEGER"),
+    ("casos", "mensaje_invitacion", "TEXT"),
 ]
 
 
@@ -427,11 +432,11 @@ def obtener_configuracion():
         return conn.execute("SELECT * FROM configuracion WHERE id = 1").fetchone()
 
 
-def guardar_datos_encargado(nombre: str, cargo: str):
+def guardar_datos_encargado(nombre: str, cargo: str, correo: str = ""):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE configuracion SET nombre_encargado = ?, cargo_encargado = ? WHERE id = 1",
-            ((nombre or "").strip() or None, (cargo or "").strip() or None),
+            "UPDATE configuracion SET nombre_encargado = ?, cargo_encargado = ?, correo_encargado = ? WHERE id = 1",
+            ((nombre or "").strip() or None, (cargo or "").strip() or None, (correo or "").strip().lower() or None),
         )
 
 
@@ -481,3 +486,72 @@ def quitar_reglamento():
                    reglamento_resumen = NULL, reglamento_error = NULL
                WHERE id = 1""",
         )
+
+
+# --------------------------------------------------------------- cierre y retención
+
+def guardar_mensaje_invitacion(rotulo: str, mensaje: str):
+    """Mensaje/instrucción breve del caso que se incluye al compartir el link (por
+    WhatsApp, correo, o con los destinatarios agregados) — puede venir escrito a mano o
+    extraído de un archivo que subió el encargado."""
+    with get_conn() as conn:
+        conn.execute("UPDATE casos SET mensaje_invitacion = ? WHERE rotulo = ?", ((mensaje or "").strip() or None, rotulo))
+
+
+def marcar_informe_emitido(rotulo: str):
+    """Se llama al descargar el informe final: cierra el caso (ya no se pueden agregar
+    relatos nuevos) y arranca la cuenta regresiva de 15 días para la purga de datos."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE casos SET estado = 'cerrado', informe_emitido_en = ? WHERE rotulo = ? AND estado = 'abierto'",
+            (now_iso(), rotulo),
+        )
+
+
+def casos_para_purgar(dias: int = 15):
+    """Casos cerrados cuyo informe se emitió hace `dias` días o más, y que todavía no
+    fueron purgados."""
+    limite = now_iso()
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT rotulo, informe_emitido_en FROM casos
+               WHERE estado = 'cerrado' AND informe_emitido_en IS NOT NULL"""
+        ).fetchall()
+    resultado = []
+    ahora = datetime.now(timezone.utc)
+    for f in filas:
+        try:
+            emitido = datetime.fromisoformat(f["informe_emitido_en"])
+        except (ValueError, TypeError):
+            continue
+        if (ahora - emitido).days >= dias:
+            resultado.append(f["rotulo"])
+    return resultado
+
+
+def purgar_caso(rotulo: str):
+    """Borra el contenido sensible del caso (relatos y síntesis) 15 días después de
+    emitido el informe, dejando solo el rótulo, las fechas, el nivel de urgencia y la
+    cantidad de relatos como estadística — más el historial de acciones, que no contiene
+    el texto de los relatos. El caso queda inaccesible desde ese momento."""
+    with get_conn() as conn:
+        n_relatos = conn.execute(
+            "SELECT COUNT(*) AS n FROM relatos r JOIN casos c ON c.id = r.caso_id WHERE c.rotulo = ?",
+            (rotulo,),
+        ).fetchone()["n"]
+        caso = conn.execute("SELECT id FROM casos WHERE rotulo = ?", (rotulo,)).fetchone()
+        if not caso:
+            return
+        conn.execute("DELETE FROM relatos WHERE caso_id = ?", (caso["id"],))
+        conn.execute(
+            """UPDATE casos
+               SET sintesis_general = NULL, problemas_json = NULL, soluciones_json = NULL,
+                   pasos_reglamento_json = NULL, mensaje_invitacion = NULL,
+                   estado = 'purgado', purgado_en = ?, n_relatos_purgado = ?
+               WHERE id = ?""",
+            (now_iso(), n_relatos, caso["id"]),
+        )
+    registrar_historial(
+        rotulo, actor="Sistema",
+        accion=f"Se cumplieron los 15 días desde el informe: se eliminó el contenido de los relatos y la síntesis ({n_relatos} relato(s)); queda solo este historial como respaldo estadístico.",
+    )

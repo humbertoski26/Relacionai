@@ -73,17 +73,62 @@ def enviar_copia_relato(email: str, nombre: str, rotulo: str, contenido: str) ->
     return _enviar(email, asunto, cuerpo)
 
 
-def enviar_invitacion(email: str, rotulo: str, link: str, fecha_limite: str = "") -> bool:
+def enviar_invitacion(email: str, rotulo: str, link: str, fecha_limite: str = "", mensaje: str = "") -> bool:
     asunto = f"Te invitaron a registrar tu relato — caso {rotulo}"
     plazo = f"\nPor favor complétalo antes del {fecha_limite}.\n" if fecha_limite else ""
+    contexto = f"\n{mensaje.strip()}\n" if (mensaje or "").strip() else ""
     cuerpo = (
         "Hola,\n\n"
         f"Te compartimos este link para que registres tu relato en el caso {rotulo}:\n{link}\n"
-        f"{plazo}\n"
+        f"{contexto}{plazo}\n"
         "Solo tú verás tu propio relato — no se comparte con otras personas que también hayan sido invitadas.\n\n"
         "Gracias."
     )
     return _enviar(email, asunto, cuerpo)
+
+
+def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str) -> bool:
+    """Envía el informe final (Word) al correo del encargado apenas se emite — sirve de
+    respaldo, porque el caso se purga automáticamente 15 días después."""
+    if not _configurado():
+        logger.info("SMTP no configurado; no se envía el informe del caso %s a %s", rotulo, email)
+        return False
+
+    host = os.environ.get("SMTP_HOST")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    usuario = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASSWORD")
+    remitente = os.environ.get("SMTP_FROM") or usuario
+    usar_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
+
+    msg = EmailMessage()
+    msg["Subject"] = f"Informe del caso {rotulo} — respaldo"
+    msg["From"] = remitente
+    msg["To"] = email
+    msg.set_content(
+        f"Hola,\n\nAdjunto el informe final del caso {rotulo} (apellido {apellido}), generado al "
+        "cerrar el caso.\n\nEste correo es tu respaldo: por política de retención, el contenido "
+        "detallado del caso (los relatos y la síntesis) se elimina automáticamente 15 días después "
+        "de emitido este informe, y solo queda un registro estadístico. Guarda este archivo si "
+        "necesitas conservar el detalle.\n\nGracias."
+    )
+    msg.add_attachment(
+        docx_bytes,
+        maintype="application",
+        subtype="vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=nombre_archivo,
+    )
+
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as server:
+            if usar_tls:
+                server.starttls()
+            server.login(usuario, password)
+            server.send_message(msg)
+        return True
+    except Exception:  # noqa: BLE001
+        logger.exception("No se pudo enviar el informe del caso %s a %s", rotulo, email)
+        return False
 
 
 def enviar_recordatorio(email: str, rotulo: str, link: str, fecha_limite: str = "") -> bool:

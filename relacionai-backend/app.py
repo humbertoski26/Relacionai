@@ -14,6 +14,7 @@ Ver README.md para variables de entorno y despliegue.
 
 import functools
 import os
+import re
 import threading
 import urllib.parse
 from datetime import datetime
@@ -26,9 +27,20 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 import models
 from claude_client import resumir_relato, resumir_reglamento, sintetizar_caso
-from email_client import enviar_copia_relato, enviar_invitacion, enviar_recordatorio
+from email_client import (
+    enviar_copia_relato,
+    enviar_informe_encargado,
+    enviar_invitacion,
+    enviar_recordatorio,
+)
 from extract import ExtractError, extraer_texto
-from report_pdf import construir_informe_pdf
+from report_docx import construir_informe_docx
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def correo_valido(email: str) -> bool:
+    return bool(EMAIL_RE.match((email or "").strip()))
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
@@ -70,18 +82,30 @@ def link_publico(rotulo: str) -> str:
     return url_for("caso_publico", rotulo=rotulo, _external=True)
 
 
-def link_whatsapp(rotulo: str, apellido: str) -> str:
+def link_whatsapp(rotulo: str, apellido: str, descripcion: str = "") -> str:
+    contexto = f" {descripcion.strip()[:200]}" if descripcion else ""
     mensaje = (
-        f"Te comparto el link para registrar tu relato en el caso {rotulo}. "
+        f"Te comparto el link para registrar tu relato en el caso {rotulo}.{contexto} "
         f"Cuando puedas, entra y sube tu versión de los hechos: {link_publico(rotulo)}"
     )
     return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
 
 
-def link_correo(rotulo: str, apellido: str) -> str:
+def actor_encargado() -> str:
+    """Nombre a usar en el historial para acciones que hace la persona logueada como
+    encargado — usa el nombre configurado en Configuración si ya lo puso, para que quede
+    registro de qué persona hizo la acción (con un solo login compartido, es la mejor
+    aproximación sin construir cuentas individuales)."""
+    config = models.obtener_configuracion()
+    nombre = config["nombre_encargado"] if config else None
+    return nombre or "Encargado de convivencia"
+
+
+def link_correo(rotulo: str, apellido: str, descripcion: str = "") -> str:
     asunto = f"Registro de relato — caso {rotulo}"
+    contexto = f"\n{descripcion.strip()[:400]}\n" if descripcion else ""
     cuerpo = (
-        f"Hola,\n\nTe comparto el link para registrar tu relato en el caso {rotulo}.\n"
+        f"Hola,\n\nTe comparto el link para registrar tu relato en el caso {rotulo}.\n{contexto}"
         f"Cuando puedas, entra y sube tu versión de los hechos:\n{link_publico(rotulo)}\n\nGracias."
     )
     return "mailto:?subject=" + urllib.parse.quote(asunto) + "&body=" + urllib.parse.quote(cuerpo)
@@ -245,7 +269,11 @@ def encargado_configuracion():
 def encargado_guardar_datos():
     nombre = request.form.get("nombre_encargado") or ""
     cargo = request.form.get("cargo_encargado") or ""
-    models.guardar_datos_encargado(nombre, cargo)
+    correo = (request.form.get("correo_encargado") or "").strip()
+    if correo and not correo_valido(correo):
+        flash("El correo del encargado no parece válido — revisa que tenga @ y una extensión (ej. .cl, .com).", "error")
+        return redirect(url_for("encargado_configuracion"))
+    models.guardar_datos_encargado(nombre, cargo, correo)
     flash("Datos del encargado actualizados.", "ok")
     return redirect(url_for("encargado_configuracion"))
 
@@ -304,14 +332,39 @@ def encargado_caso(rotulo):
     relatos = models.listar_relatos(rotulo)
     historial = models.listar_historial(rotulo)
     destinatarios = models.listar_destinatarios(rotulo)
+
+    # Numera los relatos cuando la misma persona sube más de uno (Relato 1, Relato 2…).
+    conteo_nombre = {}
+    total_por_nombre = {}
+    for r in relatos:
+        clave = (r["nombre_persona"] or "").strip().lower()
+        total_por_nombre[clave] = total_por_nombre.get(clave, 0) + 1
+    numero_relato = {}
+    for r in relatos:
+        clave = (r["nombre_persona"] or "").strip().lower()
+        if total_por_nombre.get(clave, 0) > 1:
+            conteo_nombre[clave] = conteo_nombre.get(clave, 0) + 1
+            numero_relato[r["id"]] = conteo_nombre[clave]
+
+    # El botón "Actualizar síntesis" se destaca si llegaron relatos nuevos después de la
+    # última síntesis generada.
+    sintesis_desactualizada = False
+    if relatos:
+        ultimo_relato = max(r["subido_en"] for r in relatos)
+        if not caso["sintesis_generada_en"] or ultimo_relato > caso["sintesis_generada_en"]:
+            sintesis_desactualizada = bool(caso["sintesis_general"])
+
+    descripcion = caso["mensaje_invitacion"] or ""
     return render_template(
         "encargado_caso.html",
         caso=caso, relatos=relatos, historial=historial, destinatarios=destinatarios,
         problemas=models.problemas_de(caso), soluciones=models.soluciones_de(caso),
         pasos_reglamento=models.pasos_reglamento_de(caso),
+        numero_relato=numero_relato,
+        sintesis_desactualizada=sintesis_desactualizada,
         link_publico=link_publico(rotulo),
-        link_whatsapp=link_whatsapp(rotulo, caso["apellido"]),
-        link_correo=link_correo(rotulo, caso["apellido"]),
+        link_whatsapp=link_whatsapp(rotulo, caso["apellido"], descripcion),
+        link_correo=link_correo(rotulo, caso["apellido"], descripcion),
         hoy=datetime.now().strftime("%Y-%m-%d"),
     )
 
@@ -335,7 +388,25 @@ def encargado_agregar_destinatarios(rotulo):
     if not caso:
         abort(404)
     crudo = request.form.get("emails") or ""
-    emails = [e.strip() for e in crudo.replace(",", "\n").splitlines()]
+    emails = [e.strip() for e in re.split(r"[,\n]", crudo) if e.strip()]
+    invalidos = [e for e in emails if not correo_valido(e)]
+    if invalidos:
+        flash("Estos correos no parecen válidos (revisa la arroba y la extensión, ej. .cl, .com): " + ", ".join(invalidos), "error")
+        return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+    # Instrucción breve del caso, para incluir en la invitación — texto escrito a mano, o
+    # extraído de un archivo si el encargado prefiere subir algo más largo.
+    mensaje = (request.form.get("mensaje") or "").strip()
+    archivo_instrucciones = request.files.get("instrucciones")
+    if not mensaje and archivo_instrucciones and archivo_instrucciones.filename:
+        try:
+            mensaje = extraer_texto(archivo_instrucciones.filename, archivo_instrucciones.read())
+        except ExtractError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("encargado_caso", rotulo=rotulo))
+    if mensaje:
+        models.guardar_mensaje_invitacion(rotulo, mensaje)
+
     nuevos = models.agregar_destinatarios(rotulo, emails)
     if not nuevos:
         flash("No se agregó ningún correo nuevo (revisa que estén bien escritos, o si ya estaban invitados).", "error")
@@ -344,11 +415,30 @@ def encargado_agregar_destinatarios(rotulo):
     link = link_publico(rotulo)
     enviados = 0
     for d in nuevos:
-        if enviar_invitacion(d["email"], rotulo, link, caso["fecha_limite"] or ""):
+        if enviar_invitacion(d["email"], rotulo, link, caso["fecha_limite"] or "", mensaje=mensaje):
             models.registrar_recordatorio_enviado(d["id"])
             enviados += 1
+    models.registrar_historial(
+        rotulo, actor=actor_encargado(),
+        accion=f"Envió el link del caso a {len(nuevos)} destinatario(s) nuevo(s) ({', '.join(d['email'] for d in nuevos)}).",
+    )
     flash(f"Se agregaron {len(nuevos)} destinatario(s)." + (f" Se envió la invitación por correo a {enviados}." if enviados else " No se pudo enviar el correo automático — revisa la configuración de SMTP; puedes compartir el link manualmente."), "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+
+@app.route("/encargado/casos/<rotulo>/link/registrar", methods=["POST"])
+@login_requerido
+def encargado_registrar_envio_link(rotulo):
+    """Beacon liviano: se llama por fetch() desde los botones de copiar link / WhatsApp /
+    correo en la página del caso, solo para dejar registro en el historial de qué persona
+    compartió el link y por qué medio."""
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    metodo = (request.get_json(silent=True) or {}).get("metodo") or "link"
+    etiquetas = {"copiar": "Copió el link.", "whatsapp": "Compartió el link por WhatsApp.", "correo": "Compartió el link por correo."}
+    models.registrar_historial(rotulo, actor=actor_encargado(), accion=etiquetas.get(metodo, "Compartió el link."))
+    return {"ok": True}, 200
 
 
 @app.route("/encargado/casos/<rotulo>/destinatarios/<int:destinatario_id>/recordar", methods=["POST"])
@@ -388,23 +478,43 @@ def encargado_sintetizar(rotulo):
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
 
-@app.route("/encargado/casos/<rotulo>/informe.pdf")
+@app.route("/encargado/casos/<rotulo>/informe.docx")
 @login_requerido
 def encargado_informe(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         abort(404)
+    if caso["estado"] == "purgado":
+        flash("Este caso ya fue purgado (pasaron más de 15 días desde que se emitió el informe) — ya no está disponible.", "error")
+        return redirect(url_for("encargado_caso", rotulo=rotulo))
     relatos = models.listar_relatos(rotulo)
     config = models.obtener_configuracion()
-    pdf_bytes = construir_informe_pdf(
+    nombre_archivo = f"informe_{rotulo}.docx"
+    docx_bytes = construir_informe_docx(
         caso, relatos, models.problemas_de(caso), models.soluciones_de(caso),
         pasos_reglamento=models.pasos_reglamento_de(caso), configuracion=config,
     )
-    models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Descargó el informe final del caso.")
+
+    era_abierto = caso["estado"] == "abierto"
+    models.marcar_informe_emitido(rotulo)
+    models.registrar_historial(
+        rotulo, actor=actor_encargado(),
+        accion="Descargó el informe final del caso." + (" El caso queda cerrado; en 15 días se eliminará el detalle de los relatos y la síntesis, quedando solo este historial." if era_abierto else ""),
+    )
+
+    correo_encargado = config["correo_encargado"] if config else None
+    if era_abierto and correo_encargado:
+        threading.Thread(
+            target=lambda: enviar_informe_encargado(correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo),
+            daemon=True,
+        ).start()
+
     from io import BytesIO
     return send_file(
-        BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True,
-        download_name=f"informe_{rotulo}.pdf",
+        BytesIO(docx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=nombre_archivo,
     )
 
 
@@ -415,6 +525,8 @@ def caso_publico(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
     return render_template("publico_caso.html", caso=caso)
 
 
@@ -423,12 +535,17 @@ def caso_publico_enviar(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
 
     nombre = (request.form.get("nombre") or "").strip()
     correo = (request.form.get("correo") or "").strip()
     metodo = request.form.get("metodo") or "texto"
     if not nombre:
         flash("Por favor indica tu nombre.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if not correo or not correo_valido(correo):
+        flash("Indica tu correo (lo necesitamos para poder enviarte una copia de tu relato) — revisa que tenga @ y una extensión válida, ej. .cl o .com.", "error")
         return redirect(url_for("caso_publico", rotulo=rotulo))
 
     archivo = request.files.get("archivo")
@@ -463,7 +580,9 @@ def caso_publico_enviar(rotulo):
     return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo)
 
 
-# --- job diario de recordatorios (llamado por un Render Cron Job) -----
+# --- job diario de mantenimiento (llamado por un Render Cron Job) -----
+# Hace dos cosas: reenvía recordatorios pendientes, y purga los casos cerrados hace más
+# de 15 días (borra el detalle sensible y deja solo el historial con la estadística).
 
 @app.route("/tasks/recordatorios", methods=["POST"])
 def tarea_recordatorios():
@@ -479,7 +598,15 @@ def tarea_recordatorios():
             models.registrar_recordatorio_enviado(d["id"])
             models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
             enviados += 1
-    return {"revisados": len(pendientes), "enviados": enviados}, 200
+
+    rotulos_a_purgar = models.casos_para_purgar()
+    for rotulo in rotulos_a_purgar:
+        try:
+            models.purgar_caso(rotulo)
+        except Exception:
+            app.logger.exception("Error purgando el caso %s", rotulo)
+
+    return {"revisados": len(pendientes), "enviados": enviados, "purgados": len(rotulos_a_purgar)}, 200
 
 
 if __name__ == "__main__":

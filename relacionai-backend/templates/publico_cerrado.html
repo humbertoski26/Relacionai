@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Caso cerrado — RelacionAI{% endblock %}
+{% block app_class %} narrow{% endblock %}
+{% block content %}
+<div class="card" style="padding:28px; text-align:center;">
+  <h1 style="font-size:20px; margin-bottom:10px;">Este caso ya está cerrado</h1>
+  {% if caso['estado'] == 'purgado' %}
+  <p style="color:var(--ink-muted); font-size:13.5px;">
+    Ya pasó el período de retención de este caso y su contenido fue eliminado. Si necesitas
+    registrar un relato nuevo, pide a la persona encargada que abra un caso nuevo.
+  </p>
+  {% else %}
+  <p style="color:var(--ink-muted); font-size:13.5px;">
+    Se emitió el informe final y ya no se pueden agregar relatos nuevos a este caso. Si
+    necesitas registrar algo adicional, pide a la persona encargada que abra un caso nuevo.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}{{ caso['rotulo'] }} — Relacionai{% endblock %}
+{% block title %}{{ caso['rotulo'] }} — RelacionAI{% endblock %}
 {% block topnav %}
 <div class="topnav">
   <a href="{{ url_for('encargado_dashboard') }}">← Todos los casos</a>
-  <a href="{{ url_for('encargado_configuracion') }}">Configuración</a>
-  <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+  <a class="btn-icon" href="{{ url_for('encargado_configuracion') }}" title="Configuración" aria-label="Configuración">⚙</a>
+  <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>
 {% endblock %}
 {% block content %}
@@ -17,44 +17,75 @@
       Creado {{ caso['creado_en']|fecha }}
       {% if caso['nivel_urgencia'] %} · <span class="pill pill-{{ caso['nivel_urgencia'] }}">Urgencia {{ caso['nivel_urgencia'] }}</span>{% endif %}
       {% if caso['titulo'] %} · {{ caso['titulo'] }}{% endif %}
-      {% if caso['fecha_limite'] %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
+      {% if caso['estado'] != 'abierto' %} · <span class="pill pill-{{ caso['estado'] }}">{{ caso['estado']|capitalize }}</span>{% endif %}
+      {% if caso['fecha_limite'] and caso['estado'] == 'abierto' %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
     </p>
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
-    {% if caso['sintesis_general'] %}
-    <a class="btn btn-primary" href="{{ url_for('encargado_informe', rotulo=caso['rotulo']) }}">Descargar informe (PDF)</a>
+    {% if caso['sintesis_general'] and caso['estado'] != 'purgado' %}
+    <a class="btn btn-primary" href="{{ url_for('encargado_informe', rotulo=caso['rotulo']) }}">Descargar informe (Word){% if caso['estado'] == 'abierto' %} y cerrar caso{% endif %}</a>
     {% endif %}
+    {% if caso['estado'] == 'abierto' %}
     <form method="post" action="{{ url_for('encargado_sintetizar', rotulo=caso['rotulo']) }}">
-      <button type="submit" class="btn btn-ghost">{{ 'Actualizar síntesis' if caso['sintesis_general'] else 'Generar síntesis' }}</button>
+      <button type="submit" class="btn btn-ghost{{ ' btn-destacado' if sintesis_desactualizada else '' }}">{{ 'Actualizar síntesis' if caso['sintesis_general'] else 'Generar síntesis' }}</button>
     </form>
+    {% if sintesis_desactualizada %}<span class="pill pill-medio" style="align-self:center;">Hay relatos nuevos</span>{% endif %}
+    {% endif %}
   </div>
 </div>
 
-<div class="section card" style="padding:20px;">
-  <h3>Compartir este caso</h3>
-  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Envía este link a las personas involucradas para que suban su propio relato a esta misma carpeta.</p>
-  <code class="linkbox" id="link-caso">{{ link_publico }}</code>
-  <div class="share-row" style="margin-top:12px;">
-    <button type="button" class="btn btn-ghost" id="btn-copiar-link" data-link="{{ link_publico }}">Copiar link</button>
-    <a class="btn btn-wa" href="https://wa.me/?text={{ (link_publico ~ ' — registra tu relato en el caso ' ~ caso['rotulo'])|urlencode }}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
-    <a class="btn btn-mail" href="{{ link_correo }}">Enviar por correo</a>
-  </div>
+{% if caso['estado'] == 'cerrado' %}
+<div class="flash flash-ok">Este caso está cerrado — se emitió el informe {{ caso['informe_emitido_en']|fecha }}. En 15 días se eliminará el detalle de los relatos y la síntesis, quedando solo el historial como respaldo estadístico.</div>
+{% elif caso['estado'] == 'purgado' %}
+<div class="flash flash-error">Este caso fue purgado el {{ caso['purgado_en']|fecha }} (pasaron 15 días desde el informe) — se eliminó el contenido de los {{ caso['n_relatos_purgado'] }} relato(s) y la síntesis. Queda solo este historial como respaldo estadístico.</div>
+{% endif %}
 
-  <form method="post" action="{{ url_for('encargado_set_plazo', rotulo=caso['rotulo']) }}" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
-    <label for="fecha_limite" style="font-size:13px; font-weight:600;">Fecha máxima de entrega</label>
-    <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;">
-      <input type="date" id="fecha_limite" name="fecha_limite" value="{{ caso['fecha_limite'] or '' }}" style="max-width:180px;">
-      <button type="submit" class="btn btn-ghost">Guardar plazo</button>
+<div class="section card" style="padding:20px;">
+  <h3>Fecha máxima de entrega</h3>
+  <form method="post" action="{{ url_for('encargado_set_plazo', rotulo=caso['rotulo']) }}">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="date" id="fecha_limite" name="fecha_limite" value="{{ caso['fecha_limite'] or '' }}" style="max-width:180px;" {{ 'disabled' if caso['estado'] != 'abierto' else '' }}>
+      <button type="submit" class="btn btn-ghost" {{ 'disabled' if caso['estado'] != 'abierto' else '' }}>Guardar plazo</button>
     </div>
     <p style="font-size:12px; color:var(--ink-faint); margin-top:6px;">Se muestra a las personas cuando entran a subir su relato, y se incluye en las invitaciones y recordatorios por correo.</p>
   </form>
 </div>
 
+{% if caso['estado'] == 'abierto' %}
+<div class="section card" style="padding:20px;">
+  <h3>Compartir este caso</h3>
+  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Envía este link a las personas involucradas para que suban su propio relato a esta misma carpeta. Copiar, WhatsApp y correo incluyen automáticamente una breve descripción del caso y el rótulo.</p>
+  <code class="linkbox" id="link-caso">{{ link_publico }}</code>
+  <div class="share-row" style="margin-top:12px;">
+    <button type="button" class="btn btn-ghost" id="btn-copiar-link" data-link="{{ link_publico }}" data-metodo="copiar">Copiar link</button>
+    <a class="btn btn-wa btn-compartir" data-metodo="whatsapp" href="{{ link_whatsapp }}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
+    <a class="btn btn-mail btn-compartir" data-metodo="correo" href="{{ link_correo }}">Enviar por correo</a>
+  </div>
+</div>
+
 <div class="section card" style="padding:20px;">
   <h3>Destinatarios</h3>
   <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Agrega los correos de las personas que deben registrar su relato — se les envía el link automáticamente (si el correo está configurado) y quedan en la lista de seguimiento para recordatorios.</p>
-  <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}">
-    <textarea name="emails" rows="2" placeholder="uno o varios correos, separados por coma o por línea" style="width:100%; resize:vertical;"></textarea>
+  <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}" enctype="multipart/form-data" id="form-destinatarios">
+    <div id="filas-correo">
+      <div class="email-row">
+        <input type="email" name="emails" placeholder="correo@ejemplo.cl">
+        <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
+      </div>
+      <div class="email-row">
+        <input type="email" name="emails" placeholder="correo@ejemplo.cl">
+        <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
+      </div>
+    </div>
+    <button type="button" class="btn-agregar-correo" id="btn-mas-correo">+ Agregar otro correo</button>
+
+    <div class="field" style="margin-top:14px;">
+      <label for="mensaje">Descripción breve del caso (opcional)</label>
+      <textarea id="mensaje" name="mensaje" rows="2" placeholder="Se incluye en la invitación por correo y en los mensajes de WhatsApp/correo de arriba" style="min-height:60px;">{{ caso['mensaje_invitacion'] or '' }}</textarea>
+      <div class="hint">O, si prefieres algo más largo, sube un archivo con las instrucciones del caso en vez de escribir aquí:</div>
+      <input type="file" name="instrucciones" accept=".txt,.docx,.pdf" style="margin-top:6px;">
+    </div>
+
     <button type="submit" class="btn btn-primary" style="margin-top:8px;">Agregar y enviar link</button>
   </form>
 
@@ -83,14 +114,67 @@
   <p style="font-size:13px; color:var(--ink-faint); margin-top:12px;">Aún no agregas destinatarios.</p>
   {% endif %}
 </div>
+{% endif %}
 
 <script>
+  function registrarEnvioLink(metodo) {
+    try {
+      fetch("{{ url_for('encargado_registrar_envio_link', rotulo=caso['rotulo']) }}", {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({metodo: metodo}),
+      });
+    } catch (e) {}
+  }
+  document.querySelectorAll('.btn-compartir').forEach(function (el) {
+    el.addEventListener('click', function () { registrarEnvioLink(el.getAttribute('data-metodo')); });
+  });
+
+  (function () {
+    var contenedor = document.getElementById('filas-correo');
+    var btnMas = document.getElementById('btn-mas-correo');
+    if (!contenedor || !btnMas) return;
+    btnMas.addEventListener('click', function () {
+      var fila = document.createElement('div');
+      fila.className = 'email-row';
+      fila.innerHTML = '<input type="email" name="emails" placeholder="correo@ejemplo.cl">' +
+        '<button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar">✕</button>';
+      contenedor.appendChild(fila);
+      fila.querySelector('.btn-quitar').addEventListener('click', function () { fila.remove(); });
+    });
+    contenedor.querySelectorAll('.btn-quitar').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var filas = contenedor.querySelectorAll('.email-row');
+        if (filas.length > 1) { b.closest('.email-row').remove(); }
+      });
+    });
+    var formDestinatarios = document.getElementById('form-destinatarios');
+    if (formDestinatarios) {
+      formDestinatarios.addEventListener('submit', function (ev) {
+        var valido = true;
+        var re = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+        contenedor.querySelectorAll('input[name="emails"]').forEach(function (input) {
+          input.classList.remove('input-error');
+          var v = input.value.trim();
+          if (v && !re.test(v)) {
+            input.classList.add('input-error');
+            valido = false;
+          }
+        });
+        if (!valido) {
+          ev.preventDefault();
+          alert('Revisa los correos marcados en rojo — falta la arroba o la extensión (ej. .cl, .com).');
+        }
+      });
+    }
+  })();
+
   var btnCopiar = document.getElementById('btn-copiar-link');
   if (btnCopiar) {
     var original = btnCopiar.textContent;
     var mostrarExito = function () {
       btnCopiar.textContent = '¡Copiado! ✓';
       btnCopiar.classList.add('btn-copiado');
+      registrarEnvioLink('copiar');
       setTimeout(function () {
         btnCopiar.textContent = original;
         btnCopiar.classList.remove('btn-copiado');
@@ -161,8 +245,12 @@
 </div>
 {% else %}
 <div class="section card" style="padding:20px; color:var(--ink-muted); font-size:13.5px;">
+  {% if caso['estado'] == 'purgado' %}
+  El contenido de este caso ya fue purgado según la política de retención de 15 días.
+  {% else %}
   Todavía no hay síntesis general — se genera automáticamente apenas llegue el primer relato (puede
   tardar uno o dos minutos; recarga la página), o puedes generarla manualmente con el botón de arriba.
+  {% endif %}
 </div>
 {% endif %}
 
@@ -171,7 +259,7 @@
   {% for r in relatos %}
   <div class="card" style="padding:18px 20px; margin-bottom:12px;">
     <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-      <strong>{{ r['nombre_persona'] }}</strong>
+      <strong>{{ r['nombre_persona'] }}{% if numero_relato.get(r['id']) %}<span class="numero-relato">Relato {{ numero_relato[r['id']] }}</span>{% endif %}</strong>
       <span style="font-size:12px; color:var(--ink-faint);">{{ r['subido_en']|fecha }} · {{ r['formato_entrada'] }}{% if r['archivo_original'] %} · {{ r['archivo_original'] }}{% endif %}</span>
     </div>
     {% if r['resumen'] %}
