@@ -109,6 +109,7 @@ _MIGRATIONS = [
     ("configuracion", "insignia_bytes", "BLOB"),
     ("configuracion", "insignia_mime", "TEXT"),
     ("configuracion", "insignia_nombre_archivo", "TEXT"),
+    ("configuracion", "nombre_colegio", "TEXT"),
 ]
 
 
@@ -229,6 +230,21 @@ def set_fecha_limite(rotulo: str, fecha_limite: str, actor: str = "Encargado de 
         rotulo, actor=actor,
         accion=(f"Definió el {fecha_limite} como fecha máxima de entrega." if fecha_limite else "Quitó la fecha máxima de entrega."),
     )
+
+
+def contar_relatos_de_correo(rotulo: str, correo: str) -> int:
+    """Cuántos relatos ya envió esta persona (identificada por su correo) a este caso —
+    se usa para limitar a un máximo de relatos por persona y deshabilitar el link para
+    ella una vez alcanzado."""
+    caso = obtener_caso(rotulo)
+    if not caso or not (correo or "").strip():
+        return 0
+    with get_conn() as conn:
+        fila = conn.execute(
+            "SELECT COUNT(*) AS n FROM relatos WHERE caso_id = ? AND LOWER(correo_persona) = LOWER(?)",
+            (caso["id"], correo.strip()),
+        ).fetchone()
+        return fila["n"] if fila else 0
 
 
 def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archivo_original, contenido: str, correo_persona: str = ""):
@@ -480,6 +496,17 @@ def guardar_datos_encargado(nombre: str, cargo: str, correo: str = ""):
         conn.execute(
             "UPDATE configuracion SET nombre_encargado = ?, cargo_encargado = ?, correo_encargado = ? WHERE id = 1",
             ((nombre or "").strip() or None, (cargo or "").strip() or None, (correo or "").strip().lower() or None),
+        )
+
+
+def guardar_nombre_colegio(nombre_colegio: str):
+    """Nombre del colegio — se muestra antes de subir el reglamento interno y la
+    insignia, y sirve de referencia para saber a qué colegio pertenece esta memoria
+    (esta versión ya tiene soporte de un colegio por despliegue)."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE configuracion SET nombre_colegio = ? WHERE id = 1",
+            ((nombre_colegio or "").strip() or None,),
         )
 
 

@@ -9,11 +9,13 @@ problemas identificados y soluciones posibles, en un informe descargable
 ## Cómo funciona
 
 1. El **encargado** entra al panel (`/encargado`, con contraseña) y, la
-   primera vez, pasa por una **configuración guiada de dos pasos**: primero
-   su nombre, cargo y **correo** (se usan como firma del informe y como
-   destino del respaldo automático — ver más abajo), luego —opcional— el
-   reglamento interno de la institución. Un botón "Ir a los casos" aparece
-   apenas el primer paso está listo.
+   primera vez, pasa por una **configuración guiada**: primero su nombre,
+   cargo y **correo**, los tres obligatorios (se usan como firma del informe
+   y como destino del respaldo automático — ver más abajo), luego el nombre
+   del colegio, y luego —opcional— el reglamento interno de la institución y
+   la insignia del colegio. Un botón "Ir a los casos" aparece apenas el
+   primer paso está listo, y se resalta con un pulso una vez que se subió el
+   reglamento interno.
 2. Crea un caso indicando el apellido. La plataforma genera una carpeta con
    un **rótulo único** (`APELLIDO-FECHA-CÓDIGO`, ej. `GARRIDO-20260901-YT0A`)
    y un link público para ese caso.
@@ -59,7 +61,8 @@ problemas identificados y soluciones posibles, en un informe descargable
    Chrome), o como archivo `.docx`, `.pdf` o `.txt`. No ve los relatos de las
    demás personas. Si la misma persona sube más de un relato al mismo caso,
    el panel del encargado los numera («Relato 1», «Relato 2»…) para
-   distinguirlos.
+   distinguirlos — hasta un **máximo de 2 relatos por correo y por caso**;
+   al tercer intento el link queda deshabilitado para esa persona.
 6. Apenas llega un relato, la plataforma confirma de inmediato (no hace
    esperar a la persona) y en segundo plano Claude genera un **resumen
    individual**, y luego recalcula automáticamente la **síntesis general del
@@ -220,13 +223,9 @@ configurar nada aparte.
   texto (no como imágenes). Si se necesita aceptar archivos más grandes, hay
   que subir el plan de Render a uno con más memoria (el gratuito ronda los
   512 MB).
-- **Logo de GADUAI pendiente.** El pie de página muestra "RelacionAI, un
-  producto de GADUAI" con una insignia de reemplazo (un cuadrado con la letra
-  "G", en `static/style.css` / `templates/base.html`) porque no se contaba
-  con el archivo real del logo de GADUAI al armar esta versión. Para el
-  lanzamiento final conviene reemplazar esa insignia por el logo real —
-  basta con agregar el archivo de imagen a `static/` y cambiar el bloque
-  `footer-brand` en `templates/base.html` por una etiqueta `<img>`.
+- Cada persona (identificada por su correo) puede enviar como máximo **2
+  relatos por caso** — al tercer intento con el mismo correo, el link queda
+  deshabilitado para ella y se le pide contactar directamente al encargado.
 
 ## Estructura del proyecto
 
@@ -241,18 +240,23 @@ email_client.py   # envío de correos (copia de relato, invitación, recordatori
 test_funcional.py # pruebas automatizadas de extremo a extremo (ver más arriba)
 templates/        # HTML (Jinja2)
 static/style.css  # estilos (identidad visual RelacionAI / GADUAI)
+static/img/gaduai-logo.png  # logo oficial de GADUAI (pie de página de la app)
 data/             # base de datos SQLite (se crea sola al primer arranque)
 ```
 
 ## Configuración (panel del encargado)
 
-En `/encargado/configuracion`, presentado como un asistente de dos pasos:
+En `/encargado/configuracion`, presentado como un asistente de pasos que se
+van resaltando (y atenuando una vez completos) en el orden en que conviene
+llenarlos:
 
-1. **Datos del encargado**: nombre, cargo y **correo**. El nombre y el cargo
-   aparecen al final de todo informe Word descargado; el correo es donde se
-   envía automáticamente ese mismo informe cada vez que se cierra un caso
-   (respaldo antes de la purga de 15 días).
-2. **Reglamento interno** de la institución (Word, PDF o texto) — opcional.
+1. **Datos del encargado**: nombre, cargo y **correo** (los tres son
+   obligatorios). El nombre y el cargo aparecen al final de todo informe Word
+   descargado; el correo es donde se envía automáticamente ese mismo informe
+   cada vez que se cierra un caso (respaldo antes de la purga de 15 días).
+2. **Nombre del colegio** — se pide antes de subir el reglamento interno y la
+   insignia, como referencia de a qué colegio pertenece este despliegue.
+3. **Reglamento interno** de la institución (Word, PDF o texto) — opcional.
    Al subirlo, la página confirma de inmediato que se guardó, y tanto la
    lectura del archivo como el estudio con Claude se hacen en segundo plano
    (no hacen esperar al encargado, y no bloquean al servidor aunque un PDF en
@@ -273,12 +277,12 @@ En `/encargado/configuracion`, presentado como un asistente de dos pasos:
 
    Justo debajo, se puede subir opcionalmente la **insignia del colegio**
    (PNG, JPG o WEBP) — aparece en el encabezado de todas las páginas de la
-   aplicación (junto al nombre RelacionAI) y en el informe final Word.
+   aplicación (junto al nombre RelacionAI) y en el informe final Word. El
+   botón "Ir a los casos" se resalta (con un pulso) una vez que el reglamento
+   quedó subido, para guiar al encargado al siguiente paso natural.
 
 ## Próximos pasos sugeridos
 
-- Reemplazar la insignia de reemplazo del logo de GADUAI por el archivo real
-  (ver checklist de despliegue arriba).
 - Disco persistente / Postgres antes de tener clientes reales (ver checklist).
 - Si se vende a varios colegios: separar cada uno en su propio despliegue
   (base de datos y contraseña propias) — esta versión es de un solo colegio.

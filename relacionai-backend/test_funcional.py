@@ -493,6 +493,134 @@ def test_alertas_dashboard():
         check("alertas: al completar el relato, desaparece del cuadro correspondiente", rotulo_verde not in verdes2)
 
 
+# ================================================================ TEST 4h: nombre del colegio
+def test_nombre_colegio():
+    with app.test_client() as c:
+        login(c)
+        r = c.get("/encargado/configuracion")
+        check("colegio: campo nombre_colegio presente en configuracion", b"nombre_colegio" in r.data)
+
+        r = c.post("/encargado/configuracion/colegio", data={"nombre_colegio": ""}, follow_redirects=True)
+        config = models.obtener_configuracion()
+        check("colegio: nombre vacio es rechazado", not config["nombre_colegio"])
+
+        r = c.post("/encargado/configuracion/colegio", data={"nombre_colegio": "Colegio San Andrés"}, follow_redirects=True)
+        config = models.obtener_configuracion()
+        check("colegio: nombre del colegio guardado", config["nombre_colegio"] == "Colegio San Andrés")
+
+        r = c.get("/encargado/configuracion")
+        check("colegio: nombre guardado se muestra en el formulario", "Colegio San Andrés".encode() in r.data)
+
+
+# ================================================================ TEST 4i: datos del encargado — correo y cargo obligatorios
+def test_datos_encargado_obligatorios():
+    with app.test_client() as c:
+        login(c)
+        # sin correo -> rechazado (y no pisa lo que ya había guardado en pruebas anteriores)
+        r = c.post("/encargado/configuracion/datos", data={
+            "nombre_encargado": "Prueba Sin Correo", "cargo_encargado": "Cargo de prueba", "correo_encargado": "",
+        }, follow_redirects=True)
+        check("datos encargado: correo vacio es rechazado", "correo es obligatorio".encode() in r.data)
+        config = models.obtener_configuracion()
+        check("datos encargado: no se guarda el nombre si falta el correo", config["nombre_encargado"] != "Prueba Sin Correo")
+
+        # sin cargo -> rechazado
+        r = c.post("/encargado/configuracion/datos", data={
+            "nombre_encargado": "Prueba Sin Cargo", "cargo_encargado": "", "correo_encargado": "prueba@colegio.cl",
+        }, follow_redirects=True)
+        check("datos encargado: cargo vacio es rechazado", "Completa tu nombre y cargo".encode() in r.data)
+        config = models.obtener_configuracion()
+        check("datos encargado: no se guarda el nombre si falta el cargo", config["nombre_encargado"] != "Prueba Sin Cargo")
+
+        # completo -> aceptado
+        r = c.post("/encargado/configuracion/datos", data={
+            "nombre_encargado": "Marcela Soto", "cargo_encargado": "Encargada de Convivencia", "correo_encargado": "marcela@colegio.cl",
+        }, follow_redirects=True)
+        config = models.obtener_configuracion()
+        check("datos encargado: con nombre, cargo y correo se guarda", config["nombre_encargado"] == "Marcela Soto" and config["correo_encargado"] == "marcela@colegio.cl")
+
+
+# ================================================================ TEST 4j: secuencia de resaltado del wizard (reglamento -> insignia -> ir a los casos)
+def test_wizard_secuencia_reglamento_insignia():
+    with app.test_client() as c:
+        login(c)
+        models.quitar_reglamento()
+        models.quitar_insignia()
+
+        r = c.get("/encargado/configuracion")
+        check("secuencia: sin reglamento aun, el boton 'ir a los casos' no esta resaltado", b"btn-destacado" not in r.data)
+
+        data = {"reglamento": (io.BytesIO(b"Articulo 1: normas de convivencia."), "reglamento_secuencia.txt")}
+        c.post("/encargado/configuracion/reglamento", data=data, content_type="multipart/form-data", follow_redirects=True)
+        import time; time.sleep(0.3)
+
+        r = c.get("/encargado/configuracion")
+        check("secuencia: tras subir el reglamento, se resalta el boton 'ir a los casos'", b"btn-destacado" in r.data)
+
+        png_1x1 = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000155"
+            "0002b0d1620000000049454e44ae426082"
+        )
+        data = {"insignia": (io.BytesIO(png_1x1), "insignia_secuencia.png")}
+        c.post("/encargado/configuracion/insignia", data=data, content_type="multipart/form-data", follow_redirects=True)
+        r = c.get("/encargado/configuracion")
+        check("secuencia: con reglamento e insignia, el boton sigue resaltado", b"btn-destacado" in r.data)
+        check("secuencia: la insignia guardada aparece con estilo atenuado (box-done)", b"box-done" in r.data)
+
+
+# ================================================================ TEST 4k: maximo de relatos por persona (2), luego el link queda deshabilitado
+def test_limite_relatos_por_persona():
+    with app.test_client() as c:
+        login(c)
+        c.post("/encargado/casos", data={"apellido": "LimiteRelatos"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "LimiteRelatos"][0]["rotulo"]
+        correo = "misma-persona@colegio.cl"
+
+        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número uno."}, follow_redirects=True)
+        check("limite relatos: primer relato aceptado", r.status_code == 200)
+        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número dos."}, follow_redirects=True)
+        check("limite relatos: segundo relato aceptado", r.status_code == 200)
+
+        import time; time.sleep(0.3)
+        relatos = models.listar_relatos(rotulo)
+        check("limite relatos: dos relatos guardados hasta ahora", len(relatos) == 2)
+
+        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número tres — no debería entrar."}, follow_redirects=True)
+        check("limite relatos: el tercer relato con el mismo correo es rechazado", "queda deshabilitado".encode() in r.data)
+
+        relatos_despues = models.listar_relatos(rotulo)
+        check("limite relatos: sigue habiendo solo dos relatos guardados", len(relatos_despues) == 2)
+
+        # otra persona (correo distinto) sí puede enviar el suyo sin problema
+        r = c.post(f"/caso/{rotulo}", data={"nombre": "Otra Persona", "correo": "otra-persona@colegio.cl", "relato": "Relato de otra persona."}, follow_redirects=True)
+        time.sleep(0.3)
+        relatos_final = models.listar_relatos(rotulo)
+        check("limite relatos: una persona distinta si puede enviar el suyo", len(relatos_final) == 3)
+
+
+# ================================================================ TEST 4l: columna "Plazo" en el cuadro de casos del escritorio
+def test_dashboard_muestra_plazo():
+    with app.test_client() as c:
+        login(c)
+        c.post("/encargado/casos", data={"apellido": "ConPlazoEnTabla"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "ConPlazoEnTabla"][0]["rotulo"]
+        futuro = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+        c.post(f"/encargado/casos/{rotulo}/plazo", data={"fecha_limite": futuro})
+
+        r = c.get("/encargado")
+        check("tabla casos: columna Plazo presente en el encabezado", b"<th>Plazo</th>" in r.data)
+        check("tabla casos: la fecha limite del caso aparece en la fila", futuro.encode() in r.data)
+
+
+# ================================================================ TEST 4m: logo oficial de GADUAI integrado
+def test_logo_gaduai():
+    with app.test_client() as c:
+        login(c)
+        r = c.get("/encargado")
+        check("logo gaduai: la imagen del logo oficial aparece en el pie de pagina", b"img/gaduai-logo.png" in r.data)
+        check("logo gaduai: el archivo del logo existe en static/img", os.path.exists(os.path.join(os.path.dirname(__file__), "static", "img", "gaduai-logo.png")))
+
+
 # ================================================================ TEST 5: seguridad del endpoint de tareas
 def test_tareas_seguridad():
     with app.test_client() as c:
@@ -533,6 +661,12 @@ if __name__ == "__main__":
         test_reglamento_retroactivo()
         test_mensajes_incluyen_plazo()
         test_alertas_dashboard()
+        test_nombre_colegio()
+        test_datos_encargado_obligatorios()
+        test_wizard_secuencia_reglamento_insignia()
+        test_limite_relatos_por_persona()
+        test_dashboard_muestra_plazo()
+        test_logo_gaduai()
         test_purga(rotulo)
         test_tareas_seguridad()
         test_informe_sin_correo_encargado()

@@ -64,7 +64,7 @@
 <div class="card">
   <table class="list">
     <thead>
-      <tr><th>Rótulo</th><th>Apellido</th><th>Creado</th><th>Relatos</th><th>Urgencia</th><th>Estado</th></tr>
+      <tr><th>Rótulo</th><th>Apellido</th><th>Creado</th><th>Plazo</th><th>Relatos</th><th>Urgencia</th><th>Estado</th></tr>
     </thead>
     <tbody>
       {% for c in casos %}
@@ -72,12 +72,13 @@
         <td><a class="rotulo" href="{{ url_for('encargado_caso', rotulo=c['rotulo']) }}">{{ c['rotulo'] }}</a></td>
         <td>{{ c['apellido'] }}</td>
         <td>{{ c['creado_en']|fecha }}</td>
+        <td>{% if c['fecha_limite'] %}<span class="label-mono">{{ c['fecha_limite'] }}</span>{% else %}—{% endif %}</td>
         <td>{{ c['n_relatos'] }}</td>
         <td>{% if c['nivel_urgencia'] %}<span class="pill pill-{{ c['nivel_urgencia'] }}">{{ c['nivel_urgencia'] }}</span>{% else %}—{% endif %}</td>
         <td><span class="pill pill-{{ c['estado'] }}">{{ c['estado'] }}</span></td>
       </tr>
       {% else %}
-      <tr><td colspan="6" style="text-align:center; color:var(--ink-faint); padding:26px;">Aún no hay casos creados.</td></tr>
+      <tr><td colspan="7" style="text-align:center; color:var(--ink-faint); padding:26px;">Aún no hay casos creados.</td></tr>
       {% endfor %}
     </tbody>
   </table>

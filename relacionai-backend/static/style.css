@@ -12,6 +12,10 @@
   --accent-soft: #E1EBE8;
   --accent-ink: #123B36;
 
+  /* colores del logo oficial de GADUAI, usados donde aparece el nombre RelacionAI */
+  --gaduai-navy: #22337E;
+  --gaduai-cyan: #17B4D8;
+
   --good: #3F7D4F; --good-soft: #E4EFE3;
   --warn: #A3610C; --warn-soft: #F4E7D3;
   --danger: #B0362A; --danger-soft: #F6E1DD;
@@ -28,6 +32,7 @@
     --bg:#17191A; --surface:#1F2223; --surface-sunken:#17191A; --border:#33362F;
     --ink:#ECE8E0; --ink-muted:#A8A196; --ink-faint:#746C60;
     --accent:#5CB0A2; --accent-strong:#7FCBBE; --accent-soft:#1E332F; --accent-ink:#B9E7DD;
+    --gaduai-navy:#8C9AE8; --gaduai-cyan:#4DD8F0;
     --good:#6FBF7F; --good-soft:#1E3320; --warn:#D79A4B; --warn-soft:#362A16; --danger:#E08379; --danger-soft:#3A211D;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
   }
@@ -43,8 +48,8 @@ a{ color:var(--accent-strong); }
 
 .topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border); }
 .brand{ display:flex; align-items:baseline; gap:10px; text-decoration:none; }
-.brand .mark{ font-family:var(--font-display); font-weight:600; font-size:24px; color:var(--ink); }
-.brand .mark em{ font-style:italic; color:var(--accent-strong); }
+.brand .mark{ font-family:var(--font-display); font-weight:600; font-size:24px; color:var(--gaduai-navy); }
+.brand .mark em{ font-style:italic; color:var(--gaduai-cyan); }
 .brand .tag{ font-size:12px; color:var(--ink-muted); font-family:var(--font-mono); max-width:300px; line-height:1.35; }
 .subnav{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); font-family:var(--font-mono); margin:-14px 0 20px; }
 .topnav{ display:flex; gap:10px; align-items:center; font-size:13.5px; }
@@ -54,8 +59,8 @@ a{ color:var(--accent-strong); }
 .btn-icon:hover{ background:var(--accent-soft); color:var(--accent-strong); }
 .btn-framed{ padding:8px 14px; border-radius:8px; border:1.5px solid var(--border); color:var(--ink-muted); text-decoration:none; font-weight:700; font-size:12.5px; }
 .btn-framed:hover{ border-color:var(--danger); color:var(--danger); }
-.footer-brand{ display:flex; align-items:center; gap:8px; }
-.footer-gaduai{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:5px; background:var(--accent-strong); color:#fff; font-family:var(--font-display); font-weight:700; font-size:12px; }
+.footer-brand{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.footer-logo-gaduai{ height:22px; width:auto; display:block; }
 
 .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
 

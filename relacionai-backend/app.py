@@ -38,6 +38,8 @@ from report_docx import construir_informe_docx
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+MAX_RELATOS_POR_PERSONA = 2  # por caso — al llegar al tope, el link queda deshabilitado para esa persona
+
 
 def correo_valido(email: str) -> bool:
     return bool(EMAIL_RE.match((email or "").strip()))
@@ -340,11 +342,29 @@ def encargado_guardar_datos():
     nombre = request.form.get("nombre_encargado") or ""
     cargo = request.form.get("cargo_encargado") or ""
     correo = (request.form.get("correo_encargado") or "").strip()
-    if correo and not correo_valido(correo):
+    if not nombre.strip() or not cargo.strip():
+        flash("Completa tu nombre y cargo.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    if not correo:
+        flash("Tu correo es obligatorio — es donde se envía automáticamente el informe final de cada caso al cerrarse.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    if not correo_valido(correo):
         flash("El correo del encargado no parece válido — revisa que tenga @ y una extensión (ej. .cl, .com).", "error")
         return redirect(url_for("encargado_configuracion"))
     models.guardar_datos_encargado(nombre, cargo, correo)
     flash("Datos del encargado actualizados.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/colegio", methods=["POST"])
+@login_requerido
+def encargado_guardar_colegio():
+    nombre_colegio = (request.form.get("nombre_colegio") or "").strip()
+    if not nombre_colegio:
+        flash("Escribe el nombre del colegio.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    models.guardar_nombre_colegio(nombre_colegio)
+    flash("Nombre del colegio guardado.", "ok")
     return redirect(url_for("encargado_configuracion"))
 
 
@@ -659,6 +679,15 @@ def caso_publico_enviar(rotulo):
         return redirect(url_for("caso_publico", rotulo=rotulo))
     if not correo or not correo_valido(correo):
         flash("Indica tu correo (lo necesitamos para poder enviarte una copia de tu relato) — revisa que tenga @ y una extensión válida, ej. .cl o .com.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+
+    if models.contar_relatos_de_correo(rotulo, correo) >= MAX_RELATOS_POR_PERSONA:
+        flash(
+            f"Ya registraste {MAX_RELATOS_POR_PERSONA} relatos con este correo en este caso — "
+            "por ahora el link queda deshabilitado para ti. Si necesitas agregar algo más, "
+            "contacta directamente a la persona encargada de convivencia escolar.",
+            "error",
+        )
         return redirect(url_for("caso_publico", rotulo=rotulo))
 
     archivo = request.files.get("archivo")
