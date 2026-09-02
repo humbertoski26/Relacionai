@@ -69,11 +69,11 @@
   <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}" enctype="multipart/form-data" id="form-destinatarios">
     <div id="filas-correo">
       <div class="email-row">
-        <input type="email" name="emails" placeholder="correo@ejemplo.cl">
+        <input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">
         <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
       </div>
       <div class="email-row">
-        <input type="email" name="emails" placeholder="correo@ejemplo.cl">
+        <input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">
         <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
       </div>
     </div>
@@ -136,7 +136,7 @@
     btnMas.addEventListener('click', function () {
       var fila = document.createElement('div');
       fila.className = 'email-row';
-      fila.innerHTML = '<input type="email" name="emails" placeholder="correo@ejemplo.cl">' +
+      fila.innerHTML = '<input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">' +
         '<button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar">✕</button>';
       contenedor.appendChild(fila);
       fila.querySelector('.btn-quitar').addEventListener('click', function () { fila.remove(); });

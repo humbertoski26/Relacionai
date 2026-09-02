@@ -81,6 +81,26 @@
     <button type="submit" class="btn btn-primary">{{ 'Reemplazar reglamento' if paso2_listo else 'Subir reglamento' }}</button>
   </form>
   <div class="hint" style="margin-top:8px;">Word (.docx), PDF o texto plano — este paso es opcional, puedes seguir sin subirlo.</div>
+
+  <div style="margin-top:18px; padding-top:16px; border-top:1px solid var(--border);">
+    <h3 style="font-size:12.5px;">Insignia del colegio (opcional)</h3>
+    <p style="font-size:12.5px; color:var(--ink-muted); margin-bottom:10px;">
+      Aparece en todas las páginas de la aplicación y en el informe final descargable.
+    </p>
+    {% if config['insignia_nombre_archivo'] %}
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+      <img src="{{ url_for('ver_insignia') }}" alt="Insignia del colegio" style="height:40px; width:auto; border-radius:6px; border:1px solid var(--border);">
+      <span style="font-size:12.5px; color:var(--ink-muted);">{{ config['insignia_nombre_archivo'] }}</span>
+      <form method="post" action="{{ url_for('encargado_quitar_insignia') }}">
+        <button type="submit" class="btn btn-ghost" style="padding:5px 10px; font-size:11.5px;">Quitar</button>
+      </form>
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('encargado_subir_insignia') }}" enctype="multipart/form-data" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+      <input type="file" name="insignia" accept=".png,.jpg,.jpeg,.webp">
+      <button type="submit" class="btn btn-ghost">{{ 'Reemplazar insignia' if config['insignia_nombre_archivo'] else 'Subir insignia' }}</button>
+    </form>
+  </div>
 </div>
 
 {% if paso1_listo %}

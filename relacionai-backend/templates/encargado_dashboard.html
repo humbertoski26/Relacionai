@@ -13,6 +13,32 @@
 {% set con_sintesis = casos|selectattr('sintesis_general')|list|length %}
 {% set urgentes = casos|selectattr('nivel_urgencia','equalto','alto')|list|length %}
 
+<div class="alertas-row">
+  {% for color, etiqueta in [('rojo', 'Pendientes — falta 1 día o menos'), ('amarillo', 'Pendientes — faltan 2 días'), ('verde', 'Pendientes — faltan más de 2 días')] %}
+  <details class="alerta-caja alerta-{{ color }}">
+    <summary><span class="num">{{ pendientes[color]|length }}</span><span class="lbl">{{ etiqueta }}</span></summary>
+    <div class="alerta-body">
+      {% for it in pendientes[color] %}
+      <div class="alerta-fila">
+        <span>{{ it['email'] }} · <a href="{{ url_for('encargado_caso', rotulo=it['rotulo']) }}">{{ it['rotulo'] }}</a> ·
+          {% if it['dias_restantes'] < 0 %}Venció{% elif it['dias_restantes'] == 0 %}Hoy{% elif it['dias_restantes'] == 1 %}Mañana{% else %}{{ it['dias_restantes'] }} días{% endif %}</span>
+        <span class="acciones">
+          <button type="button" class="btn-copiar-generico" data-link="{{ it['link'] }}">Copiar</button>
+          <a href="{{ it['link_whatsapp'] }}" target="_blank" rel="noopener">WhatsApp</a>
+          <form method="post" action="{{ url_for('encargado_recordar_destinatario', rotulo=it['rotulo'], destinatario_id=it['destinatario_id']) }}" style="display:inline;">
+            <input type="hidden" name="volver" value="dashboard">
+            <button type="submit">Correo</button>
+          </form>
+        </span>
+      </div>
+      {% else %}
+      <div class="alerta-vacia">Sin pendientes en este rango.</div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</div>
+
 <div class="stat-row">
   <div class="card stat"><div class="num">{{ total }}</div><div class="lbl">Casos totales</div></div>
   <div class="card stat"><div class="num">{{ abiertos }}</div><div class="lbl">Abiertos</div></div>
@@ -56,4 +82,23 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  document.querySelectorAll('.btn-copiar-generico').forEach(function (btn) {
+    btn.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      var link = btn.getAttribute('data-link');
+      var listo = function () {
+        var original = btn.textContent;
+        btn.textContent = '¡Copiado!';
+        setTimeout(function () { btn.textContent = original; }, 1500);
+      };
+      if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(listo).catch(function () { window.prompt('Copia el link manualmente:', link); });
+      } else {
+        window.prompt('Copia el link manualmente:', link);
+      }
+    });
+  });
+</script>
 {% endblock %}

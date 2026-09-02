@@ -44,6 +44,14 @@ problemas identificados y soluciones posibles, en un informe descargable
    encargado puede recordarles manualmente con un botón, y además hay una
    tarea diaria automática que les reenvía un recordatorio si aún no
    completan su relato (ver "Recordatorios automáticos y purga" más abajo).
+   En el escritorio (`/encargado`), tres cuadros de alerta — rojo (falta 1
+   día o menos, incluye vencidos), amarillo (2 días) y verde (más de 2
+   días) — muestran cuántos destinatarios están pendientes según cuánto
+   falta para el plazo de su caso; cada cuadro se abre con un clic y lista
+   a las personas con acciones directas para copiar el link o reenviarlo
+   por WhatsApp/correo como recordatorio. Se recalculan solos en cada
+   carga de la página, así que un destinatario desaparece de un cuadro (o
+   cambia de color) apenas completa su relato o cambia el plazo.
 5. Cada persona entra al link, escribe su nombre, **su correo (obligatorio,
    validado)** —para recibir una copia de su propio relato—, y sube su
    relato — como texto pegado, dictado por voz (botón de micrófono, revisable
@@ -256,7 +264,16 @@ En `/encargado/configuracion`, presentado como un asistente de dos pasos:
    hay nada aplicable, lo dice explícitamente en vez de inventar un
    procedimiento. Se aplica a todas las síntesis (nuevas y al volver a
    generar una existente) mientras el reglamento esté cargado; se puede
-   reemplazar o quitar en cualquier momento.
+   reemplazar o quitar en cualquier momento. **Al subir o reemplazar el
+   reglamento, los casos abiertos que ya tenían una síntesis generada se
+   vuelven a sintetizar solos en segundo plano** para que incorporen los
+   pasos del reglamento recién cargado — no hace falta entrar caso por
+   caso a pedirlo manualmente (queda una entrada en el historial de cada
+   caso afectado).
+
+   Justo debajo, se puede subir opcionalmente la **insignia del colegio**
+   (PNG, JPG o WEBP) — aparece en el encabezado de todas las páginas de la
+   aplicación (junto al nombre RelacionAI) y en el informe final Word.
 
 ## Próximos pasos sugeridos
 

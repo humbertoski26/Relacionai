@@ -106,6 +106,9 @@ _MIGRATIONS = [
     ("casos", "purgado_en", "TEXT"),
     ("casos", "n_relatos_purgado", "INTEGER"),
     ("casos", "mensaje_invitacion", "TEXT"),
+    ("configuracion", "insignia_bytes", "BLOB"),
+    ("configuracion", "insignia_mime", "TEXT"),
+    ("configuracion", "insignia_nombre_archivo", "TEXT"),
 ]
 
 
@@ -218,12 +221,12 @@ def casos_pasados_resumen(excluir_rotulo: str = "", limite: int = 6):
     return resultado
 
 
-def set_fecha_limite(rotulo: str, fecha_limite: str):
+def set_fecha_limite(rotulo: str, fecha_limite: str, actor: str = "Encargado de convivencia"):
     """fecha_limite: fecha en formato YYYY-MM-DD, o cadena vacía/None para quitarla."""
     with get_conn() as conn:
         conn.execute("UPDATE casos SET fecha_limite = ? WHERE rotulo = ?", (fecha_limite or None, rotulo))
     registrar_historial(
-        rotulo, actor="Encargado de convivencia",
+        rotulo, actor=actor,
         accion=(f"Definió el {fecha_limite} como fecha máxima de entrega." if fecha_limite else "Quitó la fecha máxima de entrega."),
     )
 
@@ -319,7 +322,7 @@ def pasos_reglamento_de(caso) -> list:
 
 # --------------------------------------------------------------- destinatarios
 
-def agregar_destinatarios(rotulo: str, emails: list) -> list:
+def agregar_destinatarios(rotulo: str, emails: list, actor: str = "Encargado de convivencia") -> list:
     """Agrega los correos nuevos (ignora los ya invitados en este caso). Devuelve las filas creadas."""
     caso = obtener_caso(rotulo)
     if not caso:
@@ -350,7 +353,7 @@ def agregar_destinatarios(rotulo: str, emails: list) -> list:
             creados.append(conn.execute("SELECT * FROM destinatarios WHERE id = ?", (row_id,)).fetchone())
 
     for d in creados:
-        registrar_historial(rotulo, actor="Encargado de convivencia", accion=f"Invitó a {d['email']} a subir su relato a este caso.")
+        registrar_historial(rotulo, actor=actor, accion=f"Invitó a {d['email']} a subir su relato a este caso.")
     return creados
 
 
@@ -387,6 +390,46 @@ def registrar_recordatorio_enviado(destinatario_id: int):
             "UPDATE destinatarios SET ultimo_recordatorio_en = ? WHERE id = ?",
             (now_iso(), destinatario_id),
         )
+
+
+def pendientes_por_urgencia():
+    """Destinatarios que aún no completan su relato, en casos abiertos con fecha límite
+    definida, agrupados por urgencia según los días que faltan para el plazo — para el
+    cuadro de alertas del escritorio del encargado. Se recalcula en cada carga de la
+    página (no se guarda aparte), así que siempre refleja el estado actual: al enviar un
+    link o completar un relato, el destinatario deja de aparecer o cambia de grupo solo.
+
+    rojo: falta 1 día o menos (incluye vencidos). amarillo: faltan 2 días.
+    verde: faltan más de 2 días.
+    """
+    hoy = datetime.now().date()
+    resultado = {"rojo": [], "amarillo": [], "verde": []}
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT d.id AS destinatario_id, d.email AS email,
+                      c.rotulo AS rotulo, c.apellido AS apellido, c.fecha_limite AS fecha_limite
+               FROM destinatarios d
+               JOIN casos c ON c.id = d.caso_id
+               WHERE d.cumplido_en IS NULL AND c.estado = 'abierto' AND c.fecha_limite IS NOT NULL
+               ORDER BY c.fecha_limite ASC"""
+        ).fetchall()
+    for f in filas:
+        try:
+            fecha_limite = datetime.strptime(f["fecha_limite"], "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        dias_restantes = (fecha_limite - hoy).days
+        item = {
+            "destinatario_id": f["destinatario_id"], "email": f["email"], "rotulo": f["rotulo"],
+            "apellido": f["apellido"], "fecha_limite": f["fecha_limite"], "dias_restantes": dias_restantes,
+        }
+        if dias_restantes <= 1:
+            resultado["rojo"].append(item)
+        elif dias_restantes == 2:
+            resultado["amarillo"].append(item)
+        else:
+            resultado["verde"].append(item)
+    return resultado
 
 
 def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
@@ -485,6 +528,23 @@ def quitar_reglamento():
                SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL,
                    reglamento_resumen = NULL, reglamento_error = NULL
                WHERE id = 1""",
+        )
+
+
+def guardar_insignia(contenido_bytes: bytes, mime: str, nombre_archivo: str):
+    """Insignia/logo del colegio (opcional) — se muestra en todas las páginas de la
+    aplicación y en el informe final descargable, junto al reglamento interno."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE configuracion SET insignia_bytes = ?, insignia_mime = ?, insignia_nombre_archivo = ? WHERE id = 1",
+            (contenido_bytes, mime, nombre_archivo),
+        )
+
+
+def quitar_insignia():
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE configuracion SET insignia_bytes = NULL, insignia_mime = NULL, insignia_nombre_archivo = NULL WHERE id = 1",
         )
 
 

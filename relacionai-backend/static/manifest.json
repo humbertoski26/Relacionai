@@ -1,6 +1,6 @@
 {
-  "name": "Relacionai",
-  "short_name": "Relacionai",
+  "name": "RelacionAI",
+  "short_name": "RelacionAI",
   "description": "Registro y análisis de relatos personales para casos de convivencia.",
   "start_url": "/encargado",
   "scope": "/",

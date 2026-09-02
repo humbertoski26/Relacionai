@@ -354,6 +354,145 @@ def test_adjuntos():
         check("adjunto: formato_entrada marcado como 'word'", any(r2["formato_entrada"] == "word" for r2 in relatos))
 
 
+# ================================================================ TEST 4c: correo real con varias casillas (bug de .get() vs .getlist())
+def test_multi_email_casillas_reales():
+    from werkzeug.datastructures import MultiDict
+    with app.test_client() as c:
+        login(c)
+        c.post("/encargado/casos", data={"apellido": "Multicasilla"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "Multicasilla"][0]["rotulo"]
+
+        # simula el formulario real: dos <input name="emails"> separadas, no una sola casilla
+        # con comas — esto es lo que manda el navegador de verdad con el botón "+ Agregar otro correo"
+        data = MultiDict([("emails", "primero@colegio.cl"), ("emails", "segundo@colegio.cl")])
+        r = c.post(f"/encargado/casos/{rotulo}/destinatarios", data=data, follow_redirects=True)
+        destinatarios = models.listar_destinatarios(rotulo)
+        emails = {d["email"] for d in destinatarios}
+        check("multi-correo: ambas casillas separadas se guardan (no solo la primera)", emails == {"primero@colegio.cl", "segundo@colegio.cl"})
+
+
+# ================================================================ TEST 4d: insignia del colegio
+def test_insignia():
+    with app.test_client() as c:
+        login(c)
+        # antes de subir nada: la ruta pública de la insignia da 404
+        r = c.get("/insignia")
+        check("insignia: sin insignia subida, /insignia da 404", r.status_code == 404)
+
+        # una imagen PNG mínima válida (1x1) para la prueba
+        png_1x1 = bytes.fromhex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000155"
+            "0002b0d1620000000049454e44ae426082"
+        )
+        data = {"insignia": (io.BytesIO(png_1x1), "logo_colegio.png")}
+        r = c.post("/encargado/configuracion/insignia", data=data, content_type="multipart/form-data", follow_redirects=True)
+        check("insignia: subida aceptada", r.status_code == 200)
+
+        config = models.obtener_configuracion()
+        check("insignia: bytes guardados en la configuracion", config["insignia_bytes"] == png_1x1)
+        check("insignia: mime guardado", config["insignia_mime"] == "image/png")
+
+        r = c.get("/insignia")
+        check("insignia: la ruta publica ahora sirve los bytes de la imagen", r.status_code == 200 and r.data == png_1x1)
+
+        r = c.get("/encargado/configuracion")
+        check("insignia: aparece en la pagina de configuracion", b"logo_colegio.png" in r.data)
+
+        r = c.get("/encargado")
+        check("insignia: aparece en el encabezado de otras paginas (base.html)", b'src="/insignia"' in r.data)
+
+        # rechaza un formato no soportado
+        data = {"insignia": (io.BytesIO(b"no es una imagen"), "archivo.gif")}
+        r = c.post("/encargado/configuracion/insignia", data=data, content_type="multipart/form-data", follow_redirects=True)
+        check("insignia: formato no compatible (.gif) es rechazado", "Formato de imagen no compatible".encode() in r.data)
+
+        r = c.post("/encargado/configuracion/insignia/quitar", follow_redirects=True)
+        config = models.obtener_configuracion()
+        check("insignia: se puede quitar", config["insignia_bytes"] is None)
+        r = c.get("/insignia")
+        check("insignia: tras quitarla, /insignia vuelve a dar 404", r.status_code == 404)
+
+        # la construcción del informe Word no debe romperse ni con ni sin insignia
+        from report_docx import construir_informe_docx
+        caso_row = models.obtener_caso([x for x in models.listar_casos()][0]["rotulo"])
+        data = construir_informe_docx(caso_row, [], [], [], configuracion=models.obtener_configuracion())
+        check("insignia: el informe se genera bien sin insignia", len(data) > 0)
+
+
+# ================================================================ TEST 4e: el reglamento se re-aplica a casos ya abiertos (retroactivo)
+def test_reglamento_retroactivo():
+    with app.test_client() as c:
+        login(c)
+        # caso abierto que YA tiene una síntesis generada, sin reglamento (pasos_reglamento vacío)
+        models.quitar_reglamento()  # estado limpio: pruebas anteriores ya pudieron haber subido uno
+        c.post("/encargado/casos", data={"apellido": "Retroactivo"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "Retroactivo"][0]["rotulo"]
+        c.post(f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "r@correo.cl", "relato": "Un relato cualquiera para sintetizar."}, follow_redirects=True)
+        import time; time.sleep(0.3)
+
+        caso_antes = models.obtener_caso(rotulo)
+        check("retroactivo: el caso ya tiene sintesis antes de subir el reglamento", bool(caso_antes["sintesis_general"]))
+        check("retroactivo: sin reglamento aun, pasos_reglamento vacio", not models.pasos_reglamento_de(caso_antes))
+
+        # ahora se sube (o reemplaza) el reglamento interno
+        data = {"reglamento": (io.BytesIO(b"Articulo 5: en caso de conflicto, se cita a los apoderados."), "reglamento_nuevo.txt")}
+        c.post("/encargado/configuracion/reglamento", data=data, content_type="multipart/form-data", follow_redirects=True)
+        time.sleep(0.4)
+
+        caso_despues = models.obtener_caso(rotulo)
+        check("retroactivo: el caso abierto se re-sintetiza solo tras cargar el reglamento", bool(models.pasos_reglamento_de(caso_despues)))
+        historial = models.listar_historial(rotulo)
+        check("retroactivo: queda registro en el historial de la actualizacion automatica", any("reglamento interno recién cargado" in h["accion"] for h in historial))
+
+
+# ================================================================ TEST 4f: mensajes de WhatsApp/correo incluyen el plazo
+def test_mensajes_incluyen_plazo():
+    with app.test_request_context():
+        mensaje_wa = appmod.link_whatsapp("ROT-1", "Perez", fecha_limite="2026-09-20")
+        check("plazo: el link de WhatsApp incluye la fecha limite", "2026-09-20" in mensaje_wa)
+        mensaje_correo = appmod.link_correo("ROT-1", "Perez", fecha_limite="2026-09-20")
+        check("plazo: el link de correo incluye la fecha limite", "2026-09-20" in mensaje_correo)
+
+
+# ================================================================ TEST 4g: cuadros de alerta del escritorio (rojo/amarillo/verde)
+def test_alertas_dashboard():
+    with app.test_client() as c:
+        login(c)
+        hoy = datetime.now()
+        casos_fechas = {
+            "AlertaRoja": (hoy + timedelta(days=1)).strftime("%Y-%m-%d"),      # rojo (<=1 dia)
+            "AlertaVencida": (hoy - timedelta(days=2)).strftime("%Y-%m-%d"),   # rojo (vencido)
+            "AlertaAmarilla": (hoy + timedelta(days=2)).strftime("%Y-%m-%d"),  # amarillo
+            "AlertaVerde": (hoy + timedelta(days=9)).strftime("%Y-%m-%d"),     # verde
+        }
+        rotulos = {}
+        for apellido, fecha in casos_fechas.items():
+            c.post("/encargado/casos", data={"apellido": apellido}, follow_redirects=True)
+            rotulo = [x for x in models.listar_casos() if x["apellido"] == apellido][0]["rotulo"]
+            rotulos[apellido] = rotulo
+            c.post(f"/encargado/casos/{rotulo}/plazo", data={"fecha_limite": fecha})
+            c.post(f"/encargado/casos/{rotulo}/destinatarios", data={"emails": f"pendiente-{apellido.lower()}@colegio.cl"}, follow_redirects=True)
+
+        pendientes = models.pendientes_por_urgencia()
+        rojos = {it["rotulo"] for it in pendientes["rojo"]}
+        amarillos = {it["rotulo"] for it in pendientes["amarillo"]}
+        verdes = {it["rotulo"] for it in pendientes["verde"]}
+        check("alertas: caso a 1 dia cae en rojo", rotulos["AlertaRoja"] in rojos)
+        check("alertas: caso vencido tambien cae en rojo", rotulos["AlertaVencida"] in rojos)
+        check("alertas: caso a 2 dias cae en amarillo", rotulos["AlertaAmarilla"] in amarillos)
+        check("alertas: caso a 9 dias cae en verde", rotulos["AlertaVerde"] in verdes)
+
+        r = c.get("/encargado")
+        check("alertas: el escritorio carga con los tres cuadros", b"alerta-rojo" in r.data and b"alerta-amarillo" in r.data and b"alerta-verde" in r.data)
+
+        # al completar el relato, el destinatario deja de aparecer en cualquier cuadro
+        rotulo_verde = rotulos["AlertaVerde"]
+        c.post(f"/caso/{rotulo_verde}", data={"nombre": "Cumplidor", "correo": f"pendiente-alertaverde@colegio.cl", "relato": "Ya lo mande."}, follow_redirects=True)
+        pendientes2 = models.pendientes_por_urgencia()
+        verdes2 = {it["rotulo"] for it in pendientes2["verde"]}
+        check("alertas: al completar el relato, desaparece del cuadro correspondiente", rotulo_verde not in verdes2)
+
+
 # ================================================================ TEST 5: seguridad del endpoint de tareas
 def test_tareas_seguridad():
     with app.test_client() as c:
@@ -389,6 +528,11 @@ if __name__ == "__main__":
         test_wizard_configuracion()
         rotulo = test_flujo_caso_completo()
         test_adjuntos()
+        test_multi_email_casillas_reales()
+        test_insignia()
+        test_reglamento_retroactivo()
+        test_mensajes_incluyen_plazo()
+        test_alertas_dashboard()
         test_purga(rotulo)
         test_tareas_seguridad()
         test_informe_sin_correo_encargado()

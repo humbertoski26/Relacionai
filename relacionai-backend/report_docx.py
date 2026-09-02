@@ -13,7 +13,7 @@ from datetime import datetime
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, RGBColor
+from docx.shared import Inches, Pt, RGBColor
 
 ACCENT = RGBColor(0x1E, 0x4E, 0x48)
 INK = RGBColor(0x23, 0x20, 0x19)
@@ -81,6 +81,13 @@ def _bullets(doc, items):
 def construir_informe_docx(caso, relatos, problemas, soluciones, pasos_reglamento=None, configuracion=None) -> bytes:
     """caso: sqlite3.Row de la tabla casos. relatos: lista de sqlite3.Row de la tabla relatos."""
     doc = Document()
+
+    insignia_bytes = configuracion["insignia_bytes"] if configuracion else None
+    if insignia_bytes:
+        try:
+            doc.add_picture(io.BytesIO(insignia_bytes), width=Inches(0.9))
+        except Exception:
+            pass  # imagen corrupta o formato no soportado por python-docx: se omite sin romper el informe
 
     _titulo(doc, "Informe de análisis — RelacionAI")
     nivel = (caso["nivel_urgencia"] or "medio")

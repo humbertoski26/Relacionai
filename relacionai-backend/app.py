@@ -78,17 +78,60 @@ def fmt_fecha(iso: str) -> str:
 app.jinja_env.filters["fecha"] = fmt_fecha
 
 
+@app.context_processor
+def inject_config_global():
+    """Disponible en todas las plantillas (incluidas las públicas) — usado por base.html
+    para mostrar la insignia del colegio en el encabezado de cada página, sin que cada
+    vista tenga que pasarla a mano."""
+    try:
+        return {"config_global": models.obtener_configuracion()}
+    except Exception:
+        return {"config_global": None}
+
+
 def link_publico(rotulo: str) -> str:
     return url_for("caso_publico", rotulo=rotulo, _external=True)
 
 
-def link_whatsapp(rotulo: str, apellido: str, descripcion: str = "") -> str:
+def _texto_plazo(fecha_limite: str) -> str:
+    return f" El plazo máximo para completarlo es el {fecha_limite}." if fecha_limite else ""
+
+
+def link_whatsapp(rotulo: str, apellido: str, descripcion: str = "", fecha_limite: str = "") -> str:
     contexto = f" {descripcion.strip()[:200]}" if descripcion else ""
     mensaje = (
         f"Te comparto el link para registrar tu relato en el caso {rotulo}.{contexto} "
         f"Cuando puedas, entra y sube tu versión de los hechos: {link_publico(rotulo)}"
+        f"{_texto_plazo(fecha_limite)}"
     )
     return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
+
+
+def _texto_dias_restantes(dias_restantes: int) -> str:
+    if dias_restantes < 0:
+        return "El plazo para tu relato ya venció"
+    if dias_restantes == 0:
+        return "Hoy es el último día para completar tu relato"
+    if dias_restantes == 1:
+        return "Mañana vence el plazo para tu relato"
+    return f"Quedan {dias_restantes} días para completar tu relato"
+
+
+def link_whatsapp_recordatorio(rotulo: str, dias_restantes: int) -> str:
+    mensaje = (
+        f"Recordatorio — caso {rotulo}: {_texto_dias_restantes(dias_restantes)}. "
+        f"Puedes completarlo aquí: {link_publico(rotulo)}"
+    )
+    return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
+
+
+def link_correo_recordatorio(rotulo: str, dias_restantes: int) -> str:
+    asunto = f"Recordatorio — falta tu relato, caso {rotulo}"
+    cuerpo = (
+        f"Hola,\n\n{_texto_dias_restantes(dias_restantes)} en el caso {rotulo}.\n"
+        f"Puedes completarlo aquí:\n{link_publico(rotulo)}\n\nGracias."
+    )
+    return "mailto:?subject=" + urllib.parse.quote(asunto) + "&body=" + urllib.parse.quote(cuerpo)
 
 
 def actor_encargado() -> str:
@@ -101,12 +144,13 @@ def actor_encargado() -> str:
     return nombre or "Encargado de convivencia"
 
 
-def link_correo(rotulo: str, apellido: str, descripcion: str = "") -> str:
+def link_correo(rotulo: str, apellido: str, descripcion: str = "", fecha_limite: str = "") -> str:
     asunto = f"Registro de relato — caso {rotulo}"
     contexto = f"\n{descripcion.strip()[:400]}\n" if descripcion else ""
     cuerpo = (
         f"Hola,\n\nTe comparto el link para registrar tu relato en el caso {rotulo}.\n{contexto}"
-        f"Cuando puedas, entra y sube tu versión de los hechos:\n{link_publico(rotulo)}\n\nGracias."
+        f"Cuando puedas, entra y sube tu versión de los hechos:\n{link_publico(rotulo)}\n"
+        f"{_texto_plazo(fecha_limite)}\n\nGracias."
     )
     return "mailto:?subject=" + urllib.parse.quote(asunto) + "&body=" + urllib.parse.quote(cuerpo)
 
@@ -201,6 +245,21 @@ def _procesar_reglamento_en_segundo_plano(nombre_archivo: str, contenido_bytes: 
     except Exception:
         app.logger.exception("Error generando en segundo plano el resumen del reglamento interno.")
 
+    # El reglamento aplica a TODOS los casos del colegio, no solo a los nuevos: se
+    # re-sintetizan los casos abiertos que ya tenían una síntesis generada, para que
+    # incorporen los pasos del reglamento recién cargado (o reemplazado) sin que el
+    # encargado tenga que entrar caso por caso a pedirlo manualmente.
+    for c in models.listar_casos():
+        if c["estado"] == "abierto" and c["sintesis_general"]:
+            try:
+                _recalcular_sintesis(c["rotulo"])
+                models.registrar_historial(
+                    c["rotulo"], actor="Claude",
+                    accion="Actualizó la síntesis para incorporar el reglamento interno recién cargado.",
+                )
+            except Exception:
+                app.logger.exception("Error re-sintetizando el caso %s tras cargar el reglamento", c["rotulo"])
+
 
 @app.errorhandler(413)
 def error_archivo_grande(_exc):
@@ -254,7 +313,18 @@ def encargado_logout():
 @login_requerido
 def encargado_dashboard():
     casos = models.listar_casos()
-    return render_template("encargado_dashboard.html", casos=casos)
+    pendientes_raw = models.pendientes_por_urgencia()
+    pendientes = {}
+    for color, items in pendientes_raw.items():
+        enriquecidos = []
+        for it in items:
+            it = dict(it)
+            it["link"] = link_publico(it["rotulo"])
+            it["link_whatsapp"] = link_whatsapp_recordatorio(it["rotulo"], it["dias_restantes"])
+            it["link_correo"] = link_correo_recordatorio(it["rotulo"], it["dias_restantes"])
+            enriquecidos.append(it)
+        pendientes[color] = enriquecidos
+    return render_template("encargado_dashboard.html", casos=casos, pendientes=pendientes)
 
 
 @app.route("/encargado/configuracion", methods=["GET"])
@@ -311,6 +381,45 @@ def encargado_quitar_reglamento():
     return redirect(url_for("encargado_configuracion"))
 
 
+TIPOS_INSIGNIA = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp"}
+
+
+@app.route("/encargado/configuracion/insignia", methods=["POST"])
+@login_requerido
+def encargado_subir_insignia():
+    archivo = request.files.get("insignia")
+    if not archivo or not archivo.filename:
+        flash("Elige una imagen (PNG, JPG o WEBP) con la insignia del colegio.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    mime = archivo.mimetype
+    if mime not in TIPOS_INSIGNIA:
+        flash("Formato de imagen no compatible — usa PNG, JPG o WEBP.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    contenido = archivo.read()
+    models.guardar_insignia(contenido, mime, archivo.filename)
+    flash("Insignia del colegio guardada — ya aparece en todas las páginas y en el informe final.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/insignia/quitar", methods=["POST"])
+@login_requerido
+def encargado_quitar_insignia():
+    models.quitar_insignia()
+    flash("Se quitó la insignia del colegio.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/insignia")
+def ver_insignia():
+    """Sirve la insignia del colegio — sin login, porque aparece en todas las páginas,
+    incluida la pública donde alguien sube su relato."""
+    config = models.obtener_configuracion()
+    if not config or not config["insignia_bytes"]:
+        abort(404)
+    from io import BytesIO
+    return send_file(BytesIO(config["insignia_bytes"]), mimetype=config["insignia_mime"] or "image/png")
+
+
 @app.route("/encargado/casos", methods=["POST"])
 @login_requerido
 def encargado_crear_caso():
@@ -319,7 +428,7 @@ def encargado_crear_caso():
     if not apellido:
         flash("Indica el apellido para rotular el caso.", "error")
         return redirect(url_for("encargado_dashboard"))
-    caso = models.crear_caso(apellido, titulo=titulo, creado_por="Encargado de convivencia")
+    caso = models.crear_caso(apellido, titulo=titulo, creado_por=actor_encargado())
     return redirect(url_for("encargado_caso", rotulo=caso["rotulo"]))
 
 
@@ -363,8 +472,8 @@ def encargado_caso(rotulo):
         numero_relato=numero_relato,
         sintesis_desactualizada=sintesis_desactualizada,
         link_publico=link_publico(rotulo),
-        link_whatsapp=link_whatsapp(rotulo, caso["apellido"], descripcion),
-        link_correo=link_correo(rotulo, caso["apellido"], descripcion),
+        link_whatsapp=link_whatsapp(rotulo, caso["apellido"], descripcion, caso["fecha_limite"] or ""),
+        link_correo=link_correo(rotulo, caso["apellido"], descripcion, caso["fecha_limite"] or ""),
         hoy=datetime.now().strftime("%Y-%m-%d"),
     )
 
@@ -376,7 +485,7 @@ def encargado_set_plazo(rotulo):
     if not caso:
         abort(404)
     fecha_limite = (request.form.get("fecha_limite") or "").strip()
-    models.set_fecha_limite(rotulo, fecha_limite)
+    models.set_fecha_limite(rotulo, fecha_limite, actor=actor_encargado())
     flash("Fecha límite actualizada." if fecha_limite else "Se quitó la fecha límite.", "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
@@ -387,8 +496,10 @@ def encargado_agregar_destinatarios(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         abort(404)
-    crudo = request.form.get("emails") or ""
-    emails = [e.strip() for e in re.split(r"[,\n]", crudo) if e.strip()]
+    # getlist(), no get(): el formulario manda varias casillas con el mismo name="emails"
+    # (una por cada correo agregado con el botón "+") — con .get() solo se leía la primera.
+    crudos = request.form.getlist("emails")
+    emails = [e.strip() for crudo in crudos for e in re.split(r"[,\n]", crudo) if e.strip()]
     invalidos = [e for e in emails if not correo_valido(e)]
     if invalidos:
         flash("Estos correos no parecen válidos (revisa la arroba y la extensión, ej. .cl, .com): " + ", ".join(invalidos), "error")
@@ -407,7 +518,7 @@ def encargado_agregar_destinatarios(rotulo):
     if mensaje:
         models.guardar_mensaje_invitacion(rotulo, mensaje)
 
-    nuevos = models.agregar_destinatarios(rotulo, emails)
+    nuevos = models.agregar_destinatarios(rotulo, emails, actor=actor_encargado())
     if not nuevos:
         flash("No se agregó ningún correo nuevo (revisa que estén bien escritos, o si ya estaban invitados).", "error")
         return redirect(url_for("encargado_caso", rotulo=rotulo))
@@ -451,10 +562,12 @@ def encargado_recordar_destinatario(rotulo, destinatario_id):
     ok = enviar_recordatorio(d["email"], rotulo, link_publico(rotulo), caso["fecha_limite"] or "")
     if ok:
         models.registrar_recordatorio_enviado(destinatario_id)
-        models.registrar_historial(rotulo, actor="Encargado de convivencia", accion=f"Envió un recordatorio manual a {d['email']}.")
+        models.registrar_historial(rotulo, actor=actor_encargado(), accion=f"Envió un recordatorio manual a {d['email']}.")
         flash(f"Recordatorio enviado a {d['email']}.", "ok")
     else:
         flash("No se pudo enviar el recordatorio — revisa la configuración de SMTP.", "error")
+    if request.form.get("volver") == "dashboard":
+        return redirect(url_for("encargado_dashboard"))
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
 

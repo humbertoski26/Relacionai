@@ -24,6 +24,9 @@
   <div class="app{% block app_class %}{% endblock %}">
     <div class="topbar">
       <a class="brand" href="{{ url_for('home') }}">
+        {% if config_global and config_global['insignia_nombre_archivo'] %}
+        <img src="{{ url_for('ver_insignia') }}" class="insignia-colegio" alt="Insignia del colegio">
+        {% endif %}
         <span class="mark">Relacion<em>AI</em></span>
         <span class="tag">Un sistema inteligente de casos de convivencia educativa</span>
       </a>

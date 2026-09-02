@@ -134,3 +134,28 @@ code.linkbox{ display:block; background:var(--surface-sunken); border:1px solid 
 footer{ margin-top:40px; padding-top:18px; border-top:1px solid var(--border); font-size:11.5px; color:var(--ink-faint); }
 
 .numero-relato{ font-family:var(--font-mono); font-size:11px; color:var(--accent-strong); background:var(--accent-soft); padding:2px 8px; border-radius:999px; margin-left:6px; }
+
+.insignia-colegio{ height:32px; width:auto; border-radius:6px; object-fit:contain; }
+
+.campo-correo-destacado{ background:var(--accent-soft); border:1.5px solid var(--accent); border-radius:10px; padding:14px 16px; }
+.campo-correo-destacado label{ font-size:14px; color:var(--accent-ink); }
+.campo-correo-destacado input{ font-size:16px; padding:13px 14px; background:var(--surface); border-color:var(--accent); }
+
+.alertas-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:22px; }
+details.alerta-caja{ border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+details.alerta-caja summary{ list-style:none; cursor:pointer; padding:16px 18px; display:flex; flex-direction:column; gap:2px; }
+details.alerta-caja summary::-webkit-details-marker{ display:none; }
+details.alerta-caja summary .num{ font-family:var(--font-mono); font-size:22px; font-weight:500; }
+details.alerta-caja summary .lbl{ font-size:12px; opacity:.85; }
+details.alerta-caja .alerta-body{ padding:0 18px 16px; }
+.alerta-rojo summary{ background:var(--danger-soft); color:var(--danger); }
+.alerta-rojo .alerta-body{ background:var(--danger-soft); }
+.alerta-amarillo summary{ background:var(--warn-soft); color:var(--warn); }
+.alerta-amarillo .alerta-body{ background:var(--warn-soft); }
+.alerta-verde summary{ background:var(--good-soft); color:var(--good); }
+.alerta-verde .alerta-body{ background:var(--good-soft); }
+.alerta-fila{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 0; border-top:1px solid rgba(0,0,0,.08); font-size:13px; }
+.alerta-fila:first-child{ border-top:none; }
+.alerta-fila .acciones{ display:flex; gap:6px; }
+.alerta-fila .acciones button, .alerta-fila .acciones a{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11.5px; color:var(--ink); text-decoration:none; cursor:pointer; }
+.alerta-vacia{ font-size:12.5px; opacity:.75; padding:8px 0; }
