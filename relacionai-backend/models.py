@@ -100,6 +100,7 @@ _MIGRATIONS = [
     ("relatos", "correo_persona", "TEXT"),
     ("casos", "pasos_reglamento_json", "TEXT"),
     ("configuracion", "reglamento_resumen", "TEXT"),
+    ("configuracion", "reglamento_error", "TEXT"),
 ]
 
 
@@ -434,12 +435,26 @@ def guardar_datos_encargado(nombre: str, cargo: str):
         )
 
 
+def guardar_reglamento_pendiente(nombre_archivo: str):
+    """Se llama apenas llega el archivo, antes de intentar leerlo — así la persona ve de
+    inmediato que se subió, mientras la lectura (que puede tardar, sobre todo con PDF
+    pesados o con estructuras raras) se termina en segundo plano."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = ?, reglamento_texto = NULL, reglamento_subido_en = ?,
+                   reglamento_resumen = NULL, reglamento_error = NULL
+               WHERE id = 1""",
+            (nombre_archivo, now_iso()),
+        )
+
+
 def guardar_reglamento(nombre_archivo: str, texto: str, resumen: str = ""):
     with get_conn() as conn:
         conn.execute(
             """UPDATE configuracion
                SET reglamento_nombre_archivo = ?, reglamento_texto = ?, reglamento_subido_en = ?,
-                   reglamento_resumen = ?
+                   reglamento_resumen = ?, reglamento_error = NULL
                WHERE id = 1""",
             (nombre_archivo, texto, now_iso(), resumen or None),
         )
@@ -450,11 +465,19 @@ def guardar_resumen_reglamento(resumen: str):
         conn.execute("UPDATE configuracion SET reglamento_resumen = ? WHERE id = 1", (resumen,))
 
 
+def guardar_error_reglamento(mensaje: str):
+    """Se usa cuando la lectura del archivo falla en segundo plano (formato no compatible,
+    PDF protegido, etc.) — para que el encargado vea por qué no quedó estudiado en vez de
+    ver la página cargando para siempre."""
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET reglamento_error = ? WHERE id = 1", (mensaje,))
+
+
 def quitar_reglamento():
     with get_conn() as conn:
         conn.execute(
             """UPDATE configuracion
                SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL,
-                   reglamento_resumen = NULL
+                   reglamento_resumen = NULL, reglamento_error = NULL
                WHERE id = 1""",
         )

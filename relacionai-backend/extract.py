@@ -8,6 +8,7 @@ técnica).
 """
 
 import io
+import time
 
 import pypdf
 from docx import Document
@@ -19,6 +20,10 @@ class ExtractError(Exception):
 
 MAX_CHARS = 120_000  # tope de caracteres que guardamos por relato
 MAX_PDF_PAGINAS = 300  # tope de páginas a procesar, para no consumir memoria de más con PDFs enormes
+MAX_PDF_SEGUNDOS = 25  # tope de tiempo acumulado leyendo páginas — algunos PDF (estructuras
+# raras, casi escaneados) hacen que pypdf tarde muchísimo página por página; mejor cortar y
+# devolver lo que se alcanzó a leer que quedarse pegado (esto se procesa en segundo plano,
+# así que no bloquea al encargado, pero igual conviene no dejarlo corriendo para siempre)
 
 
 def extraer_texto(nombre_archivo: str, contenido_bytes: bytes) -> str:
@@ -79,9 +84,13 @@ def _extraer_pdf(data: bytes) -> str:
         except Exception:  # noqa: BLE001
             raise ExtractError("El PDF está protegido con contraseña; no se pudo leer.")
     partes = []
+    inicio = time.monotonic()
     for i, pagina in enumerate(lector.pages):
         if i >= MAX_PDF_PAGINAS:
             partes.append("\n[se cortó la lectura por tener demasiadas páginas]")
+            break
+        if time.monotonic() - inicio > MAX_PDF_SEGUNDOS:
+            partes.append("\n[se cortó la lectura por demorar demasiado]")
             break
         try:
             partes.append(pagina.extract_text() or "")

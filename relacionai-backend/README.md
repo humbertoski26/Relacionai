@@ -155,13 +155,16 @@ En `/encargado/configuracion` el encargado puede:
 
 - Guardar su **nombre y cargo**, que aparecen al final de todo informe PDF descargado.
 - Subir el **reglamento interno** de la institución (Word, PDF o texto). Al subirlo, la
-  página confirma de inmediato que se guardó y Claude lo estudia en segundo plano (no hace
-  esperar a el encargado); recargando la página después de unos segundos se ve un indicador
-  de "Reglamento estudiado ✓" (sin mostrar un resumen del contenido). De ahí en adelante, cada
-  síntesis de caso incluye una sección propia "Pasos del Reglamento Interno" con lo que aplica
-  al caso — si no hay nada aplicable, lo dice explícitamente en vez de inventar un
-  procedimiento. Se aplica a todas las síntesis (nuevas y al volver a generar una existente)
-  mientras el reglamento esté cargado; se puede reemplazar o quitar en cualquier momento.
+  página confirma de inmediato que se guardó, y tanto la lectura del archivo como el estudio
+  con Claude se hacen en segundo plano (no hacen esperar a el encargado, y no bloquean al
+  servidor aunque un PDF en particular tarde mucho en leerse); recargando la página después de
+  unos segundos se ve un indicador de "Reglamento estudiado ✓" (sin mostrar un resumen del
+  contenido), o un aviso explicando qué pasó si el archivo no se pudo leer. De ahí en
+  adelante, cada síntesis de caso incluye una sección propia "Pasos del Reglamento Interno"
+  con lo que aplica al caso — si no hay nada aplicable, lo dice explícitamente en vez de
+  inventar un procedimiento. Se aplica a todas las síntesis (nuevas y al volver a generar una
+  existente) mientras el reglamento esté cargado; se puede reemplazar o quitar en cualquier
+  momento.
 
 ## Próximos pasos sugeridos
 

@@ -148,12 +148,29 @@ def _sintetizar_en_segundo_plano(rotulo: str):
         app.logger.exception("Error generando en segundo plano la síntesis manual del caso %s", rotulo)
 
 
-def _procesar_reglamento_en_segundo_plano(texto: str):
-    """Genera en un hilo aparte el resumen interno que confirma que Claude estudió el
-    reglamento recién subido — se hace en segundo plano para que subir el archivo no
-    deje esperando a el encargado mientras Claude lo procesa (una llamada a Claude puede
-    tardar bastante y, si se hace de inmediato, corre el riesgo de que el servidor la
-    corte a mitad de camino y se vea como un error)."""
+def _procesar_reglamento_en_segundo_plano(nombre_archivo: str, contenido_bytes: bytes):
+    """Se ejecuta en un hilo aparte: lee el archivo (Word/PDF/texto) y genera el resumen
+    interno que confirma que Claude estudió el reglamento recién subido.
+
+    Se hace todo en segundo plano — no solo la llamada a Claude — porque algunos PDF
+    (sobre todo reglamentos largos, con estructuras raras o casi escaneados) pueden hacer
+    que la lectura misma del archivo (no solo la consulta a Claude) tarde muchísimo o se
+    quede pegada. Si eso pasara en la respuesta directa al encargado, el servidor la corta
+    a mitad de camino y se ve como un error; en un hilo aparte simplemente tarda más, sin
+    afectar el resto de la plataforma."""
+    try:
+        texto = extraer_texto(nombre_archivo, contenido_bytes)
+    except ExtractError as exc:
+        models.guardar_error_reglamento(str(exc))
+        return
+    except Exception:
+        app.logger.exception("Error inesperado leyendo el reglamento interno recién subido.")
+        models.guardar_error_reglamento(
+            "No se pudo leer este archivo. Prueba con otro formato (Word, PDF de texto o .txt)."
+        )
+        return
+
+    models.guardar_reglamento(nombre_archivo, texto)
     try:
         resumen = resumir_reglamento(texto)
         models.guardar_resumen_reglamento(resumen)
@@ -240,19 +257,18 @@ def encargado_subir_reglamento():
     if not archivo or not archivo.filename:
         flash("Elige un archivo Word o PDF con el reglamento interno.", "error")
         return redirect(url_for("encargado_configuracion"))
-    try:
-        texto = extraer_texto(archivo.filename, archivo.read())
-    except ExtractError as exc:
-        flash(str(exc), "error")
-        return redirect(url_for("encargado_configuracion"))
 
-    # Se guarda el archivo de inmediato (sin resumen todavía) y el estudio con Claude
-    # se hace en segundo plano, para no dejar esperando al encargado — ver
-    # _procesar_reglamento_en_segundo_plano.
-    models.guardar_reglamento(archivo.filename, texto)
+    nombre_archivo = archivo.filename
+    contenido_bytes = archivo.read()
+
+    # Tanto la lectura del archivo (que en algunos PDF puede tardar muchísimo o quedarse
+    # pegada) como el resumen con Claude se hacen en segundo plano — ver
+    # _procesar_reglamento_en_segundo_plano — para no dejar esperando al encargado ni
+    # arriesgar que el servidor corte la respuesta a mitad de camino.
+    models.guardar_reglamento_pendiente(nombre_archivo)
     threading.Thread(
         target=_procesar_reglamento_en_segundo_plano,
-        args=(texto,),
+        args=(nombre_archivo, contenido_bytes),
         daemon=True,
     ).start()
     flash("Reglamento interno subido y en estudio — recarga esta página en unos segundos para ver la confirmación de que Claude ya lo estudió.", "ok")
