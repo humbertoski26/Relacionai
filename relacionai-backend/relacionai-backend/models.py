@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS casos (
     interpretacion TEXT,
     problemas_json TEXT,
     soluciones_json TEXT,
+    pasos_reglamento_json TEXT,
     nivel_urgencia TEXT,
     sintesis_generada_en TEXT,
     fecha_limite TEXT
@@ -76,6 +77,16 @@ CREATE TABLE IF NOT EXISTS historial (
     accion TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS configuracion (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    nombre_encargado TEXT,
+    cargo_encargado TEXT,
+    reglamento_nombre_archivo TEXT,
+    reglamento_texto TEXT,
+    reglamento_subido_en TEXT,
+    reglamento_resumen TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
 CREATE INDEX IF NOT EXISTS idx_historial_caso ON historial(caso_id);
 CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
@@ -87,6 +98,14 @@ CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
 _MIGRATIONS = [
     ("casos", "fecha_limite", "TEXT"),
     ("relatos", "correo_persona", "TEXT"),
+    ("casos", "pasos_reglamento_json", "TEXT"),
+    ("configuracion", "reglamento_resumen", "TEXT"),
+    ("configuracion", "reglamento_error", "TEXT"),
+    ("configuracion", "correo_encargado", "TEXT"),
+    ("casos", "informe_emitido_en", "TEXT"),
+    ("casos", "purgado_en", "TEXT"),
+    ("casos", "n_relatos_purgado", "INTEGER"),
+    ("casos", "mensaje_invitacion", "TEXT"),
 ]
 
 
@@ -97,9 +116,14 @@ def now_iso():
 @contextmanager
 def get_conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # busy_timeout: ahora que el resumen/síntesis se procesa en un hilo en
+    # segundo plano, puede haber escrituras concurrentes (una petición nueva
+    # + un hilo terminando el caso anterior) — sin esto, sqlite podría lanzar
+    # "database is locked" en vez de simplemente esperar un poco.
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 8000")
     try:
         yield conn
         conn.commit()
@@ -114,6 +138,7 @@ def init_db():
             columnas = {row["name"] for row in conn.execute(f"PRAGMA table_info({tabla})")}
             if columna not in columnas:
                 conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
+        conn.execute("INSERT OR IGNORE INTO configuracion (id) VALUES (1)")
 
 
 def _slug_apellido(apellido: str) -> str:
@@ -164,6 +189,35 @@ def listar_casos():
         ).fetchall()
 
 
+def casos_pasados_resumen(excluir_rotulo: str = "", limite: int = 6):
+    """
+    Últimos casos ya sintetizados (para que la síntesis de un caso nuevo pueda
+    considerar patrones y criterios ya usados antes en el mismo establecimiento —
+    sin mezclar los hechos concretos de un caso con otro). No incluye el
+    contenido de los relatos, solo problemas / pasos de reglamento / sugerencias
+    ya generados.
+    """
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT rotulo, apellido, problemas_json, pasos_reglamento_json, soluciones_json, nivel_urgencia
+               FROM casos
+               WHERE sintesis_general IS NOT NULL AND rotulo != ?
+               ORDER BY sintesis_generada_en DESC
+               LIMIT ?""",
+            (excluir_rotulo or "", limite),
+        ).fetchall()
+    resultado = []
+    for f in filas:
+        resultado.append({
+            "rotulo": f["rotulo"],
+            "problemas": json.loads(f["problemas_json"]) if f["problemas_json"] else [],
+            "pasos_reglamento": json.loads(f["pasos_reglamento_json"]) if f["pasos_reglamento_json"] else [],
+            "sugerencias": json.loads(f["soluciones_json"]) if f["soluciones_json"] else [],
+            "nivel_urgencia": f["nivel_urgencia"] or "medio",
+        })
+    return resultado
+
+
 def set_fecha_limite(rotulo: str, fecha_limite: str):
     """fecha_limite: fecha en formato YYYY-MM-DD, o cadena vacía/None para quitarla."""
     with get_conn() as conn:
@@ -210,13 +264,13 @@ def listar_relatos(rotulo: str):
         ).fetchall()
 
 
-def guardar_sintesis_general(rotulo: str, sintesis: str, interpretacion: str, problemas: list, soluciones: list, nivel_urgencia: str):
+def guardar_sintesis_general(rotulo: str, sintesis: str, problemas: list, pasos_reglamento: list, soluciones: list, nivel_urgencia: str):
     with get_conn() as conn:
         conn.execute(
-            """UPDATE casos SET sintesis_general = ?, interpretacion = ?, problemas_json = ?,
+            """UPDATE casos SET sintesis_general = ?, problemas_json = ?, pasos_reglamento_json = ?,
                                  soluciones_json = ?, nivel_urgencia = ?, sintesis_generada_en = ?
                WHERE rotulo = ?""",
-            (sintesis, interpretacion, json.dumps(problemas, ensure_ascii=False),
+            (sintesis, json.dumps(problemas, ensure_ascii=False), json.dumps(pasos_reglamento, ensure_ascii=False),
              json.dumps(soluciones, ensure_ascii=False), nivel_urgencia, now_iso(), rotulo),
         )
 
@@ -252,6 +306,13 @@ def problemas_de(caso) -> list:
 def soluciones_de(caso) -> list:
     try:
         return json.loads(caso["soluciones_json"]) if caso["soluciones_json"] else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def pasos_reglamento_de(caso) -> list:
+    try:
+        return json.loads(caso["pasos_reglamento_json"]) if caso["pasos_reglamento_json"] else []
     except (json.JSONDecodeError, TypeError):
         return []
 
@@ -361,3 +422,136 @@ def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
                 pass
         resultado.append(row)
     return resultado
+
+
+# --------------------------------------------------------------- configuración
+
+def obtener_configuracion():
+    """Fila única (id=1) con los datos del encargado y el reglamento interno subido."""
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM configuracion WHERE id = 1").fetchone()
+
+
+def guardar_datos_encargado(nombre: str, cargo: str, correo: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE configuracion SET nombre_encargado = ?, cargo_encargado = ?, correo_encargado = ? WHERE id = 1",
+            ((nombre or "").strip() or None, (cargo or "").strip() or None, (correo or "").strip().lower() or None),
+        )
+
+
+def guardar_reglamento_pendiente(nombre_archivo: str):
+    """Se llama apenas llega el archivo, antes de intentar leerlo — así la persona ve de
+    inmediato que se subió, mientras la lectura (que puede tardar, sobre todo con PDF
+    pesados o con estructuras raras) se termina en segundo plano."""
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = ?, reglamento_texto = NULL, reglamento_subido_en = ?,
+                   reglamento_resumen = NULL, reglamento_error = NULL
+               WHERE id = 1""",
+            (nombre_archivo, now_iso()),
+        )
+
+
+def guardar_reglamento(nombre_archivo: str, texto: str, resumen: str = ""):
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = ?, reglamento_texto = ?, reglamento_subido_en = ?,
+                   reglamento_resumen = ?, reglamento_error = NULL
+               WHERE id = 1""",
+            (nombre_archivo, texto, now_iso(), resumen or None),
+        )
+
+
+def guardar_resumen_reglamento(resumen: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET reglamento_resumen = ? WHERE id = 1", (resumen,))
+
+
+def guardar_error_reglamento(mensaje: str):
+    """Se usa cuando la lectura del archivo falla en segundo plano (formato no compatible,
+    PDF protegido, etc.) — para que el encargado vea por qué no quedó estudiado en vez de
+    ver la página cargando para siempre."""
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET reglamento_error = ? WHERE id = 1", (mensaje,))
+
+
+def quitar_reglamento():
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL,
+                   reglamento_resumen = NULL, reglamento_error = NULL
+               WHERE id = 1""",
+        )
+
+
+# --------------------------------------------------------------- cierre y retención
+
+def guardar_mensaje_invitacion(rotulo: str, mensaje: str):
+    """Mensaje/instrucción breve del caso que se incluye al compartir el link (por
+    WhatsApp, correo, o con los destinatarios agregados) — puede venir escrito a mano o
+    extraído de un archivo que subió el encargado."""
+    with get_conn() as conn:
+        conn.execute("UPDATE casos SET mensaje_invitacion = ? WHERE rotulo = ?", ((mensaje or "").strip() or None, rotulo))
+
+
+def marcar_informe_emitido(rotulo: str):
+    """Se llama al descargar el informe final: cierra el caso (ya no se pueden agregar
+    relatos nuevos) y arranca la cuenta regresiva de 15 días para la purga de datos."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE casos SET estado = 'cerrado', informe_emitido_en = ? WHERE rotulo = ? AND estado = 'abierto'",
+            (now_iso(), rotulo),
+        )
+
+
+def casos_para_purgar(dias: int = 15):
+    """Casos cerrados cuyo informe se emitió hace `dias` días o más, y que todavía no
+    fueron purgados."""
+    limite = now_iso()
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT rotulo, informe_emitido_en FROM casos
+               WHERE estado = 'cerrado' AND informe_emitido_en IS NOT NULL"""
+        ).fetchall()
+    resultado = []
+    ahora = datetime.now(timezone.utc)
+    for f in filas:
+        try:
+            emitido = datetime.fromisoformat(f["informe_emitido_en"])
+        except (ValueError, TypeError):
+            continue
+        if (ahora - emitido).days >= dias:
+            resultado.append(f["rotulo"])
+    return resultado
+
+
+def purgar_caso(rotulo: str):
+    """Borra el contenido sensible del caso (relatos y síntesis) 15 días después de
+    emitido el informe, dejando solo el rótulo, las fechas, el nivel de urgencia y la
+    cantidad de relatos como estadística — más el historial de acciones, que no contiene
+    el texto de los relatos. El caso queda inaccesible desde ese momento."""
+    with get_conn() as conn:
+        n_relatos = conn.execute(
+            "SELECT COUNT(*) AS n FROM relatos r JOIN casos c ON c.id = r.caso_id WHERE c.rotulo = ?",
+            (rotulo,),
+        ).fetchone()["n"]
+        caso = conn.execute("SELECT id FROM casos WHERE rotulo = ?", (rotulo,)).fetchone()
+        if not caso:
+            return
+        conn.execute("DELETE FROM relatos WHERE caso_id = ?", (caso["id"],))
+        conn.execute(
+            """UPDATE casos
+               SET sintesis_general = NULL, problemas_json = NULL, soluciones_json = NULL,
+                   pasos_reglamento_json = NULL, mensaje_invitacion = NULL,
+                   estado = 'purgado', purgado_en = ?, n_relatos_purgado = ?
+               WHERE id = ?""",
+            (now_iso(), n_relatos, caso["id"]),
+        )
+    registrar_historial(
+        rotulo, actor="Sistema",
+        accion=f"Se cumplieron los 15 días desde el informe: se eliminó el contenido de los relatos y la síntesis ({n_relatos} relato(s)); queda solo este historial como respaldo estadístico.",
+    )

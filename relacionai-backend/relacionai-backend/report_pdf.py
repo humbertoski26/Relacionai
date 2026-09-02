@@ -1,7 +1,8 @@
 """
 Genera el informe final descargable de un caso: síntesis general,
-problemas identificados, interpretación y soluciones posibles, más el
-listado de relatos que se incluyeron en el análisis.
+problemas identificados, pasos según el reglamento interno (si se subió
+uno) y sugerencias de acción, más el listado de relatos que se incluyeron
+en el análisis.
 
 Usa reportlab (platypus) para no depender de binarios externos.
 """
@@ -59,7 +60,7 @@ def _bullets(items, style):
     )
 
 
-def construir_informe_pdf(caso, relatos, problemas, soluciones) -> bytes:
+def construir_informe_pdf(caso, relatos, problemas, soluciones, pasos_reglamento=None, configuracion=None) -> bytes:
     """caso: sqlite3.Row de la tabla casos. relatos: lista de sqlite3.Row de la tabla relatos."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -88,10 +89,11 @@ def construir_informe_pdf(caso, relatos, problemas, soluciones) -> bytes:
     story.append(Paragraph("PROBLEMAS IDENTIFICADOS", s["h2"]))
     story.append(_bullets(problemas, s["li"]))
 
-    story.append(Paragraph("INTERPRETACIÓN", s["h2"]))
-    story.append(Paragraph(caso["interpretacion"] or "—", s["body"]))
+    if pasos_reglamento:
+        story.append(Paragraph("PASOS DEL REGLAMENTO INTERNO", s["h2"]))
+        story.append(_bullets(pasos_reglamento, s["li"]))
 
-    story.append(Paragraph("SOLUCIONES POSIBLES", s["h2"]))
+    story.append(Paragraph("SUGERENCIAS DE ACCIÓN", s["h2"]))
     story.append(_bullets(soluciones, s["li"]))
 
     story.append(Paragraph("RELATOS INCLUIDOS EN ESTE CASO", s["h2"]))
@@ -118,6 +120,16 @@ def construir_informe_pdf(caso, relatos, problemas, soluciones) -> bytes:
         "Generado con asistencia de Claude a partir de los relatos registrados en Relacionai. "
         "Documento de uso interno y confidencial.", s["small"],
     ))
+
+    nombre_encargado = configuracion["nombre_encargado"] if configuracion else None
+    cargo_encargado = configuracion["cargo_encargado"] if configuracion else None
+    if nombre_encargado or cargo_encargado:
+        story.append(Spacer(1, 22))
+        firma_style = ParagraphStyle("firma", parent=s["body"], alignment=0, spaceAfter=0)
+        if nombre_encargado:
+            story.append(Paragraph(nombre_encargado, ParagraphStyle("firma_nombre", parent=firma_style, fontName="Helvetica-Bold")))
+        if cargo_encargado:
+            story.append(Paragraph(cargo_encargado, s["meta"]))
 
     doc.build(story)
     return buf.getvalue()

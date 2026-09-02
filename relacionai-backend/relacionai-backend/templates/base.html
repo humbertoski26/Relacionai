@@ -3,21 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Relacionai{% endblock %}</title>
+  <title>{% block title %}RelacionAI{% endblock %}</title>
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/apple-touch-icon.png') }}">
+  <meta name="theme-color" content="#1E4E48">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('{{ url_for('static', filename='sw.js') }}').catch(function () {});
+      });
+    }
+  </script>
 </head>
 <body>
   <div class="app{% block app_class %}{% endblock %}">
     <div class="topbar">
       <a class="brand" href="{{ url_for('home') }}">
-        <span class="mark">Relacionai</span>
-        <span class="tag">relatos&nbsp;→&nbsp;análisis&nbsp;→&nbsp;soluciones</span>
+        <span class="mark">Relacion<em>AI</em></span>
+        <span class="tag">Un sistema inteligente de casos de convivencia educativa</span>
       </a>
       {% block topnav %}{% endblock %}
     </div>
+    <div class="subnav">Relatos — Privacidad — Gestión</div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
@@ -29,7 +41,12 @@
 
     {% block content %}{% endblock %}
 
-    <footer>Relacionai — plataforma de registro y análisis de relatos.</footer>
+    <footer>
+      <div class="footer-brand">
+        <span class="footer-gaduai" aria-hidden="true">G</span>
+        <span>RelacionAI — un producto de <strong>GADUAI</strong></span>
+      </div>
+    </footer>
   </div>
 </body>
 </html>

@@ -14,6 +14,8 @@ Ver README.md para variables de entorno y despliegue.
 
 import functools
 import os
+import re
+import threading
 import urllib.parse
 from datetime import datetime
 
@@ -24,15 +26,29 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import models
-from claude_client import resumir_relato, sintetizar_caso
-from email_client import enviar_copia_relato, enviar_invitacion, enviar_recordatorio
+from claude_client import resumir_relato, resumir_reglamento, sintetizar_caso
+from email_client import (
+    enviar_copia_relato,
+    enviar_informe_encargado,
+    enviar_invitacion,
+    enviar_recordatorio,
+)
 from extract import ExtractError, extraer_texto
-from report_pdf import construir_informe_pdf
+from report_docx import construir_informe_docx
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def correo_valido(email: str) -> bool:
+    return bool(EMAIL_RE.match((email or "").strip()))
 
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB por archivo subido
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB por archivo subido — a propósito
+# bajo: el servidor gratuito tiene poca memoria, y un archivo muy pesado (sobre todo un PDF
+# escaneado como fotos de cada página) puede hacer que el proceso se caiga por completo
+# ("Internal Server Error") en vez de simplemente demorar más.
 
 ENCARGADO_PASSWORD = os.environ.get("ENCARGADO_PASSWORD", "relacionai")
 
@@ -66,21 +82,53 @@ def link_publico(rotulo: str) -> str:
     return url_for("caso_publico", rotulo=rotulo, _external=True)
 
 
-def link_whatsapp(rotulo: str, apellido: str) -> str:
+def link_whatsapp(rotulo: str, apellido: str, descripcion: str = "") -> str:
+    contexto = f" {descripcion.strip()[:200]}" if descripcion else ""
     mensaje = (
-        f"Te comparto el link para registrar tu relato en el caso {rotulo}. "
+        f"Te comparto el link para registrar tu relato en el caso {rotulo}.{contexto} "
         f"Cuando puedas, entra y sube tu versión de los hechos: {link_publico(rotulo)}"
     )
     return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
 
 
-def link_correo(rotulo: str, apellido: str) -> str:
+def actor_encargado() -> str:
+    """Nombre a usar en el historial para acciones que hace la persona logueada como
+    encargado — usa el nombre configurado en Configuración si ya lo puso, para que quede
+    registro de qué persona hizo la acción (con un solo login compartido, es la mejor
+    aproximación sin construir cuentas individuales)."""
+    config = models.obtener_configuracion()
+    nombre = config["nombre_encargado"] if config else None
+    return nombre or "Encargado de convivencia"
+
+
+def link_correo(rotulo: str, apellido: str, descripcion: str = "") -> str:
     asunto = f"Registro de relato — caso {rotulo}"
+    contexto = f"\n{descripcion.strip()[:400]}\n" if descripcion else ""
     cuerpo = (
-        f"Hola,\n\nTe comparto el link para registrar tu relato en el caso {rotulo}.\n"
+        f"Hola,\n\nTe comparto el link para registrar tu relato en el caso {rotulo}.\n{contexto}"
         f"Cuando puedas, entra y sube tu versión de los hechos:\n{link_publico(rotulo)}\n\nGracias."
     )
     return "mailto:?subject=" + urllib.parse.quote(asunto) + "&body=" + urllib.parse.quote(cuerpo)
+
+
+def _recalcular_sintesis(rotulo: str) -> dict:
+    """Recalcula la síntesis general del caso a partir de los relatos actuales
+    (usa la config del reglamento y los casos pasados vigentes al momento de llamarla)."""
+    relatos = models.listar_relatos(rotulo)
+    entrada = [
+        {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
+        for r in relatos
+    ]
+    caso = models.obtener_caso(rotulo)
+    config = models.obtener_configuracion()
+    reglamento_texto = config["reglamento_texto"] if config else ""
+    casos_pasados = models.casos_pasados_resumen(excluir_rotulo=rotulo)
+    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto, casos_pasados=casos_pasados)
+    models.guardar_sintesis_general(
+        rotulo, resultado["sintesis"],
+        resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
+    )
+    return resultado
 
 
 def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
@@ -89,21 +137,87 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
     models.guardar_resumen_relato(relato_id, resumen)
     models.registrar_historial(rotulo, actor="Claude", accion="Generó el resumen individual del relato recién subido.")
 
-    relatos = models.listar_relatos(rotulo)
-    entrada = [
-        {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
-        for r in relatos
-    ]
-    caso = models.obtener_caso(rotulo)
-    resultado = sintetizar_caso(caso["apellido"], entrada)
-    models.guardar_sintesis_general(
-        rotulo, resultado["sintesis"], resultado["interpretacion"],
-        resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
-    )
+    resultado = _recalcular_sintesis(rotulo)
     models.registrar_historial(
         rotulo, actor="Claude",
         accion=f"Actualizó la síntesis general del caso (nivel de urgencia: {resultado['nivel_urgencia']}).",
     )
+
+
+def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str):
+    """Se ejecuta en un hilo aparte para que la persona no tenga que esperar a Claude
+    (ni al envío de su copia por correo) antes de ver la confirmación."""
+    try:
+        _procesar_pipeline(rotulo, relato_id, contenido)
+    except Exception:
+        app.logger.exception("Error procesando en segundo plano el relato %s del caso %s", relato_id, rotulo)
+    if correo:
+        try:
+            enviar_copia_relato(correo, nombre, rotulo, contenido)
+        except Exception:
+            app.logger.exception("Error enviando la copia del relato a %s", correo)
+
+
+def _sintetizar_en_segundo_plano(rotulo: str):
+    """Se ejecuta en un hilo aparte al pedir manualmente 'Generar síntesis', para no
+    dejar esperando al encargado (ni arriesgar un timeout del servidor) mientras Claude
+    procesa — la misma razón por la que el envío de relatos ya corre en segundo plano."""
+    try:
+        resultado = _recalcular_sintesis(rotulo)
+        models.registrar_historial(
+            rotulo, actor="Encargado de convivencia",
+            accion=f"Actualizó manualmente la síntesis general del caso (nivel de urgencia: {resultado['nivel_urgencia']}).",
+        )
+    except Exception:
+        app.logger.exception("Error generando en segundo plano la síntesis manual del caso %s", rotulo)
+
+
+def _procesar_reglamento_en_segundo_plano(nombre_archivo: str, contenido_bytes: bytes):
+    """Se ejecuta en un hilo aparte: lee el archivo (Word/PDF/texto) y genera el resumen
+    interno que confirma que Claude estudió el reglamento recién subido.
+
+    Se hace todo en segundo plano — no solo la llamada a Claude — porque algunos PDF
+    (sobre todo reglamentos largos, con estructuras raras o casi escaneados) pueden hacer
+    que la lectura misma del archivo (no solo la consulta a Claude) tarde muchísimo o se
+    quede pegada. Si eso pasara en la respuesta directa al encargado, el servidor la corta
+    a mitad de camino y se ve como un error; en un hilo aparte simplemente tarda más, sin
+    afectar el resto de la plataforma."""
+    try:
+        texto = extraer_texto(nombre_archivo, contenido_bytes)
+    except ExtractError as exc:
+        models.guardar_error_reglamento(str(exc))
+        return
+    except Exception:
+        app.logger.exception("Error inesperado leyendo el reglamento interno recién subido.")
+        models.guardar_error_reglamento(
+            "No se pudo leer este archivo. Prueba con otro formato (Word, PDF de texto o .txt)."
+        )
+        return
+
+    models.guardar_reglamento(nombre_archivo, texto)
+    try:
+        resumen = resumir_reglamento(texto)
+        models.guardar_resumen_reglamento(resumen)
+    except Exception:
+        app.logger.exception("Error generando en segundo plano el resumen del reglamento interno.")
+
+
+@app.errorhandler(413)
+def error_archivo_grande(_exc):
+    """Se activa cuando el archivo subido supera MAX_CONTENT_LENGTH — evita que la persona
+    vea un error genérico del servidor y en vez de eso le explica qué hacer."""
+    flash(
+        "El archivo es demasiado pesado (el límite son 8 MB). Si es un PDF escaneado (fotos "
+        "de cada página), prueba comprimirlo o guardarlo como Word/PDF de texto en vez de "
+        "imágenes — así además el contenido se puede leer correctamente.",
+        "error",
+    )
+    if request.path.startswith("/encargado/configuracion/reglamento"):
+        return redirect(url_for("encargado_configuracion")), 302
+    partes = request.path.strip("/").split("/")
+    if request.path.startswith("/caso/") and len(partes) >= 2 and partes[1]:
+        return redirect(url_for("caso_publico", rotulo=partes[1])), 302
+    return redirect(url_for("home")), 302
 
 
 # ------------------------------------------------------------------ rutas
@@ -143,6 +257,60 @@ def encargado_dashboard():
     return render_template("encargado_dashboard.html", casos=casos)
 
 
+@app.route("/encargado/configuracion", methods=["GET"])
+@login_requerido
+def encargado_configuracion():
+    config = models.obtener_configuracion()
+    return render_template("encargado_configuracion.html", config=config)
+
+
+@app.route("/encargado/configuracion/datos", methods=["POST"])
+@login_requerido
+def encargado_guardar_datos():
+    nombre = request.form.get("nombre_encargado") or ""
+    cargo = request.form.get("cargo_encargado") or ""
+    correo = (request.form.get("correo_encargado") or "").strip()
+    if correo and not correo_valido(correo):
+        flash("El correo del encargado no parece válido — revisa que tenga @ y una extensión (ej. .cl, .com).", "error")
+        return redirect(url_for("encargado_configuracion"))
+    models.guardar_datos_encargado(nombre, cargo, correo)
+    flash("Datos del encargado actualizados.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/reglamento", methods=["POST"])
+@login_requerido
+def encargado_subir_reglamento():
+    archivo = request.files.get("reglamento")
+    if not archivo or not archivo.filename:
+        flash("Elige un archivo Word o PDF con el reglamento interno.", "error")
+        return redirect(url_for("encargado_configuracion"))
+
+    nombre_archivo = archivo.filename
+    contenido_bytes = archivo.read()
+
+    # Tanto la lectura del archivo (que en algunos PDF puede tardar muchísimo o quedarse
+    # pegada) como el resumen con Claude se hacen en segundo plano — ver
+    # _procesar_reglamento_en_segundo_plano — para no dejar esperando al encargado ni
+    # arriesgar que el servidor corte la respuesta a mitad de camino.
+    models.guardar_reglamento_pendiente(nombre_archivo)
+    threading.Thread(
+        target=_procesar_reglamento_en_segundo_plano,
+        args=(nombre_archivo, contenido_bytes),
+        daemon=True,
+    ).start()
+    flash("Reglamento interno subido y en estudio — recarga esta página en unos segundos para ver la confirmación de que Claude ya lo estudió.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/reglamento/quitar", methods=["POST"])
+@login_requerido
+def encargado_quitar_reglamento():
+    models.quitar_reglamento()
+    flash("Se quitó el reglamento interno.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
 @app.route("/encargado/casos", methods=["POST"])
 @login_requerido
 def encargado_crear_caso():
@@ -164,13 +332,39 @@ def encargado_caso(rotulo):
     relatos = models.listar_relatos(rotulo)
     historial = models.listar_historial(rotulo)
     destinatarios = models.listar_destinatarios(rotulo)
+
+    # Numera los relatos cuando la misma persona sube más de uno (Relato 1, Relato 2…).
+    conteo_nombre = {}
+    total_por_nombre = {}
+    for r in relatos:
+        clave = (r["nombre_persona"] or "").strip().lower()
+        total_por_nombre[clave] = total_por_nombre.get(clave, 0) + 1
+    numero_relato = {}
+    for r in relatos:
+        clave = (r["nombre_persona"] or "").strip().lower()
+        if total_por_nombre.get(clave, 0) > 1:
+            conteo_nombre[clave] = conteo_nombre.get(clave, 0) + 1
+            numero_relato[r["id"]] = conteo_nombre[clave]
+
+    # El botón "Actualizar síntesis" se destaca si llegaron relatos nuevos después de la
+    # última síntesis generada.
+    sintesis_desactualizada = False
+    if relatos:
+        ultimo_relato = max(r["subido_en"] for r in relatos)
+        if not caso["sintesis_generada_en"] or ultimo_relato > caso["sintesis_generada_en"]:
+            sintesis_desactualizada = bool(caso["sintesis_general"])
+
+    descripcion = caso["mensaje_invitacion"] or ""
     return render_template(
         "encargado_caso.html",
         caso=caso, relatos=relatos, historial=historial, destinatarios=destinatarios,
         problemas=models.problemas_de(caso), soluciones=models.soluciones_de(caso),
+        pasos_reglamento=models.pasos_reglamento_de(caso),
+        numero_relato=numero_relato,
+        sintesis_desactualizada=sintesis_desactualizada,
         link_publico=link_publico(rotulo),
-        link_whatsapp=link_whatsapp(rotulo, caso["apellido"]),
-        link_correo=link_correo(rotulo, caso["apellido"]),
+        link_whatsapp=link_whatsapp(rotulo, caso["apellido"], descripcion),
+        link_correo=link_correo(rotulo, caso["apellido"], descripcion),
         hoy=datetime.now().strftime("%Y-%m-%d"),
     )
 
@@ -194,7 +388,25 @@ def encargado_agregar_destinatarios(rotulo):
     if not caso:
         abort(404)
     crudo = request.form.get("emails") or ""
-    emails = [e.strip() for e in crudo.replace(",", "\n").splitlines()]
+    emails = [e.strip() for e in re.split(r"[,\n]", crudo) if e.strip()]
+    invalidos = [e for e in emails if not correo_valido(e)]
+    if invalidos:
+        flash("Estos correos no parecen válidos (revisa la arroba y la extensión, ej. .cl, .com): " + ", ".join(invalidos), "error")
+        return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+    # Instrucción breve del caso, para incluir en la invitación — texto escrito a mano, o
+    # extraído de un archivo si el encargado prefiere subir algo más largo.
+    mensaje = (request.form.get("mensaje") or "").strip()
+    archivo_instrucciones = request.files.get("instrucciones")
+    if not mensaje and archivo_instrucciones and archivo_instrucciones.filename:
+        try:
+            mensaje = extraer_texto(archivo_instrucciones.filename, archivo_instrucciones.read())
+        except ExtractError as exc:
+            flash(str(exc), "error")
+            return redirect(url_for("encargado_caso", rotulo=rotulo))
+    if mensaje:
+        models.guardar_mensaje_invitacion(rotulo, mensaje)
+
     nuevos = models.agregar_destinatarios(rotulo, emails)
     if not nuevos:
         flash("No se agregó ningún correo nuevo (revisa que estén bien escritos, o si ya estaban invitados).", "error")
@@ -203,11 +415,30 @@ def encargado_agregar_destinatarios(rotulo):
     link = link_publico(rotulo)
     enviados = 0
     for d in nuevos:
-        if enviar_invitacion(d["email"], rotulo, link, caso["fecha_limite"] or ""):
+        if enviar_invitacion(d["email"], rotulo, link, caso["fecha_limite"] or "", mensaje=mensaje):
             models.registrar_recordatorio_enviado(d["id"])
             enviados += 1
+    models.registrar_historial(
+        rotulo, actor=actor_encargado(),
+        accion=f"Envió el link del caso a {len(nuevos)} destinatario(s) nuevo(s) ({', '.join(d['email'] for d in nuevos)}).",
+    )
     flash(f"Se agregaron {len(nuevos)} destinatario(s)." + (f" Se envió la invitación por correo a {enviados}." if enviados else " No se pudo enviar el correo automático — revisa la configuración de SMTP; puedes compartir el link manualmente."), "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
+
+
+@app.route("/encargado/casos/<rotulo>/link/registrar", methods=["POST"])
+@login_requerido
+def encargado_registrar_envio_link(rotulo):
+    """Beacon liviano: se llama por fetch() desde los botones de copiar link / WhatsApp /
+    correo en la página del caso, solo para dejar registro en el historial de qué persona
+    compartió el link y por qué medio."""
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    metodo = (request.get_json(silent=True) or {}).get("metodo") or "link"
+    etiquetas = {"copiar": "Copió el link.", "whatsapp": "Compartió el link por WhatsApp.", "correo": "Compartió el link por correo."}
+    models.registrar_historial(rotulo, actor=actor_encargado(), accion=etiquetas.get(metodo, "Compartió el link."))
+    return {"ok": True}, 200
 
 
 @app.route("/encargado/casos/<rotulo>/destinatarios/<int:destinatario_id>/recordar", methods=["POST"])
@@ -237,33 +468,53 @@ def encargado_sintetizar(rotulo):
     if not relatos:
         flash("Este caso todavía no tiene relatos para sintetizar.", "error")
         return redirect(url_for("encargado_caso", rotulo=rotulo))
-    entrada = [
-        {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
-        for r in relatos
-    ]
-    resultado = sintetizar_caso(caso["apellido"], entrada)
-    models.guardar_sintesis_general(
-        rotulo, resultado["sintesis"], resultado["interpretacion"],
-        resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
-    )
+
+    # Se hace en segundo plano (mismo motivo que el envío de relatos): la llamada a
+    # Claude puede tardar bastante y no conviene dejar esperando al encargado ni
+    # arriesgar que el servidor la corte a mitad de camino.
+    threading.Thread(target=_sintetizar_en_segundo_plano, args=(rotulo,), daemon=True).start()
     models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Solicitó actualizar manualmente la síntesis general del caso.")
-    flash("Síntesis general actualizada.", "ok")
+    flash("Actualizando la síntesis general — recarga esta página en unos segundos para ver el resultado.", "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
 
-@app.route("/encargado/casos/<rotulo>/informe.pdf")
+@app.route("/encargado/casos/<rotulo>/informe.docx")
 @login_requerido
 def encargado_informe(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         abort(404)
+    if caso["estado"] == "purgado":
+        flash("Este caso ya fue purgado (pasaron más de 15 días desde que se emitió el informe) — ya no está disponible.", "error")
+        return redirect(url_for("encargado_caso", rotulo=rotulo))
     relatos = models.listar_relatos(rotulo)
-    pdf_bytes = construir_informe_pdf(caso, relatos, models.problemas_de(caso), models.soluciones_de(caso))
-    models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Descargó el informe final del caso.")
+    config = models.obtener_configuracion()
+    nombre_archivo = f"informe_{rotulo}.docx"
+    docx_bytes = construir_informe_docx(
+        caso, relatos, models.problemas_de(caso), models.soluciones_de(caso),
+        pasos_reglamento=models.pasos_reglamento_de(caso), configuracion=config,
+    )
+
+    era_abierto = caso["estado"] == "abierto"
+    models.marcar_informe_emitido(rotulo)
+    models.registrar_historial(
+        rotulo, actor=actor_encargado(),
+        accion="Descargó el informe final del caso." + (" El caso queda cerrado; en 15 días se eliminará el detalle de los relatos y la síntesis, quedando solo este historial." if era_abierto else ""),
+    )
+
+    correo_encargado = config["correo_encargado"] if config else None
+    if era_abierto and correo_encargado:
+        threading.Thread(
+            target=lambda: enviar_informe_encargado(correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo),
+            daemon=True,
+        ).start()
+
     from io import BytesIO
     return send_file(
-        BytesIO(pdf_bytes), mimetype="application/pdf", as_attachment=True,
-        download_name=f"informe_{rotulo}.pdf",
+        BytesIO(docx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=nombre_archivo,
     )
 
 
@@ -274,6 +525,8 @@ def caso_publico(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
     return render_template("publico_caso.html", caso=caso)
 
 
@@ -282,12 +535,17 @@ def caso_publico_enviar(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
 
     nombre = (request.form.get("nombre") or "").strip()
     correo = (request.form.get("correo") or "").strip()
     metodo = request.form.get("metodo") or "texto"
     if not nombre:
         flash("Por favor indica tu nombre.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if not correo or not correo_valido(correo):
+        flash("Indica tu correo (lo necesitamos para poder enviarte una copia de tu relato) — revisa que tenga @ y una extensión válida, ej. .cl o .com.", "error")
         return redirect(url_for("caso_publico", rotulo=rotulo))
 
     archivo = request.files.get("archivo")
@@ -309,16 +567,22 @@ def caso_publico_enviar(rotulo):
         archivo_original = None
 
     relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido, correo_persona=correo)
-    _procesar_pipeline(rotulo, relato_id, contenido)
 
-    copia_enviada = False
-    if correo:
-        copia_enviada = enviar_copia_relato(correo, nombre, rotulo, contenido)
+    # El análisis con Claude (y el envío de la copia por correo) puede tardar
+    # bastante — se hace en segundo plano para que la persona vea la confirmación
+    # de inmediato en vez de tener que esperar.
+    threading.Thread(
+        target=_procesar_relato_en_segundo_plano,
+        args=(rotulo, relato_id, contenido, nombre, correo),
+        daemon=True,
+    ).start()
 
-    return render_template("publico_gracias.html", caso=caso, nombre=nombre, copia_enviada=copia_enviada, correo=correo)
+    return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo)
 
 
-# --- job diario de recordatorios (llamado por un Render Cron Job) -----
+# --- job diario de mantenimiento (llamado por un Render Cron Job) -----
+# Hace dos cosas: reenvía recordatorios pendientes, y purga los casos cerrados hace más
+# de 15 días (borra el detalle sensible y deja solo el historial con la estadística).
 
 @app.route("/tasks/recordatorios", methods=["POST"])
 def tarea_recordatorios():
@@ -334,7 +598,15 @@ def tarea_recordatorios():
             models.registrar_recordatorio_enviado(d["id"])
             models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
             enviados += 1
-    return {"revisados": len(pendientes), "enviados": enviados}, 200
+
+    rotulos_a_purgar = models.casos_para_purgar()
+    for rotulo in rotulos_a_purgar:
+        try:
+            models.purgar_caso(rotulo)
+        except Exception:
+            app.logger.exception("Error purgando el caso %s", rotulo)
+
+    return {"revisados": len(pendientes), "enviados": enviados, "purgados": len(rotulos_a_purgar)}, 200
 
 
 if __name__ == "__main__":
