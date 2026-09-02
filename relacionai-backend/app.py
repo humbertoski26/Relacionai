@@ -14,6 +14,7 @@ Ver README.md para variables de entorno y despliegue.
 
 import functools
 import os
+import threading
 import urllib.parse
 from datetime import datetime
 
@@ -95,7 +96,9 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
         for r in relatos
     ]
     caso = models.obtener_caso(rotulo)
-    resultado = sintetizar_caso(caso["apellido"], entrada)
+    config = models.obtener_configuracion()
+    reglamento_texto = config["reglamento_texto"] if config else ""
+    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
     models.guardar_sintesis_general(
         rotulo, resultado["sintesis"], resultado["interpretacion"],
         resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
@@ -104,6 +107,20 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
         rotulo, actor="Claude",
         accion=f"Actualizó la síntesis general del caso (nivel de urgencia: {resultado['nivel_urgencia']}).",
     )
+
+
+def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str):
+    """Se ejecuta en un hilo aparte para que la persona no tenga que esperar a Claude
+    (ni al envío de su copia por correo) antes de ver la confirmación."""
+    try:
+        _procesar_pipeline(rotulo, relato_id, contenido)
+    except Exception:
+        app.logger.exception("Error procesando en segundo plano el relato %s del caso %s", relato_id, rotulo)
+    if correo:
+        try:
+            enviar_copia_relato(correo, nombre, rotulo, contenido)
+        except Exception:
+            app.logger.exception("Error enviando la copia del relato a %s", correo)
 
 
 # ------------------------------------------------------------------ rutas
@@ -141,6 +158,48 @@ def encargado_logout():
 def encargado_dashboard():
     casos = models.listar_casos()
     return render_template("encargado_dashboard.html", casos=casos)
+
+
+@app.route("/encargado/configuracion", methods=["GET"])
+@login_requerido
+def encargado_configuracion():
+    config = models.obtener_configuracion()
+    return render_template("encargado_configuracion.html", config=config)
+
+
+@app.route("/encargado/configuracion/datos", methods=["POST"])
+@login_requerido
+def encargado_guardar_datos():
+    nombre = request.form.get("nombre_encargado") or ""
+    cargo = request.form.get("cargo_encargado") or ""
+    models.guardar_datos_encargado(nombre, cargo)
+    flash("Datos del encargado actualizados.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/reglamento", methods=["POST"])
+@login_requerido
+def encargado_subir_reglamento():
+    archivo = request.files.get("reglamento")
+    if not archivo or not archivo.filename:
+        flash("Elige un archivo Word o PDF con el reglamento interno.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    try:
+        texto = extraer_texto(archivo.filename, archivo.read())
+    except ExtractError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("encargado_configuracion"))
+    models.guardar_reglamento(archivo.filename, texto)
+    flash("Reglamento interno guardado. Se usará en las próximas síntesis.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
+@app.route("/encargado/configuracion/reglamento/quitar", methods=["POST"])
+@login_requerido
+def encargado_quitar_reglamento():
+    models.quitar_reglamento()
+    flash("Se quitó el reglamento interno.", "ok")
+    return redirect(url_for("encargado_configuracion"))
 
 
 @app.route("/encargado/casos", methods=["POST"])
@@ -241,7 +300,9 @@ def encargado_sintetizar(rotulo):
         {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
         for r in relatos
     ]
-    resultado = sintetizar_caso(caso["apellido"], entrada)
+    config = models.obtener_configuracion()
+    reglamento_texto = config["reglamento_texto"] if config else ""
+    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
     models.guardar_sintesis_general(
         rotulo, resultado["sintesis"], resultado["interpretacion"],
         resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
@@ -258,7 +319,8 @@ def encargado_informe(rotulo):
     if not caso:
         abort(404)
     relatos = models.listar_relatos(rotulo)
-    pdf_bytes = construir_informe_pdf(caso, relatos, models.problemas_de(caso), models.soluciones_de(caso))
+    config = models.obtener_configuracion()
+    pdf_bytes = construir_informe_pdf(caso, relatos, models.problemas_de(caso), models.soluciones_de(caso), configuracion=config)
     models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Descargó el informe final del caso.")
     from io import BytesIO
     return send_file(
@@ -309,13 +371,17 @@ def caso_publico_enviar(rotulo):
         archivo_original = None
 
     relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido, correo_persona=correo)
-    _procesar_pipeline(rotulo, relato_id, contenido)
 
-    copia_enviada = False
-    if correo:
-        copia_enviada = enviar_copia_relato(correo, nombre, rotulo, contenido)
+    # El análisis con Claude (y el envío de la copia por correo) puede tardar
+    # bastante — se hace en segundo plano para que la persona vea la confirmación
+    # de inmediato en vez de tener que esperar.
+    threading.Thread(
+        target=_procesar_relato_en_segundo_plano,
+        args=(rotulo, relato_id, contenido, nombre, correo),
+        daemon=True,
+    ).start()
 
-    return render_template("publico_gracias.html", caso=caso, nombre=nombre, copia_enviada=copia_enviada, correo=correo)
+    return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo)
 
 
 # --- job diario de recordatorios (llamado por un Render Cron Job) -----

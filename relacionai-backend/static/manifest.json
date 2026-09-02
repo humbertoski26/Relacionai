@@ -1,0 +1,16 @@
+{
+  "name": "Relacionai",
+  "short_name": "Relacionai",
+  "description": "Registro y análisis de relatos personales para casos de convivencia.",
+  "start_url": "/encargado",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F1EEE8",
+  "theme_color": "#1E4E48",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

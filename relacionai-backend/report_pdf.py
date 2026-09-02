@@ -59,7 +59,7 @@ def _bullets(items, style):
     )
 
 
-def construir_informe_pdf(caso, relatos, problemas, soluciones) -> bytes:
+def construir_informe_pdf(caso, relatos, problemas, soluciones, configuracion=None) -> bytes:
     """caso: sqlite3.Row de la tabla casos. relatos: lista de sqlite3.Row de la tabla relatos."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -118,6 +118,16 @@ def construir_informe_pdf(caso, relatos, problemas, soluciones) -> bytes:
         "Generado con asistencia de Claude a partir de los relatos registrados en Relacionai. "
         "Documento de uso interno y confidencial.", s["small"],
     ))
+
+    nombre_encargado = configuracion["nombre_encargado"] if configuracion else None
+    cargo_encargado = configuracion["cargo_encargado"] if configuracion else None
+    if nombre_encargado or cargo_encargado:
+        story.append(Spacer(1, 22))
+        firma_style = ParagraphStyle("firma", parent=s["body"], alignment=0, spaceAfter=0)
+        if nombre_encargado:
+            story.append(Paragraph(nombre_encargado, ParagraphStyle("firma_nombre", parent=firma_style, fontName="Helvetica-Bold")))
+        if cargo_encargado:
+            story.append(Paragraph(cargo_encargado, s["meta"]))
 
     doc.build(story)
     return buf.getvalue()

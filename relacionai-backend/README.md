@@ -29,14 +29,20 @@ en un informe descargable para el encargado de convivencia.
    recibir una copia de su propio relato), y sube su relato — como texto
    pegado, o como archivo `.docx`, `.pdf` o `.txt`. No ve los relatos de las
    demás personas.
-5. Apenas llega un relato: Claude genera un **resumen individual**, y luego
-   se recalcula automáticamente la **síntesis general del caso** (combinando
-   todos los relatos recibidos hasta ese momento), identificando problemas,
-   una interpretación y posibles soluciones. Todo queda registrado con hora
-   y quién lo hizo en el **historial** del caso.
+5. Apenas llega un relato, la plataforma confirma de inmediato (no hace
+   esperar a la persona) y en segundo plano Claude genera un **resumen
+   individual**, y luego recalcula automáticamente la **síntesis general del
+   caso** (combinando todos los relatos recibidos hasta ese momento),
+   identificando problemas, una interpretación y posibles soluciones. Si el
+   encargado subió un **reglamento interno** (ver Configuración), las
+   soluciones primero indican qué dice el reglamento para ese tipo de caso, y
+   luego agregan sugerencias propias. Todo queda registrado con hora y quién
+   lo hizo en el **historial** del caso — puede tardar uno o dos minutos en
+   aparecer; conviene recargar la página del caso.
 6. El encargado descarga en cualquier momento el **informe final en PDF** con
-   la síntesis, los problemas, la interpretación, las soluciones y el listado
-   de relatos incluidos.
+   la síntesis, los problemas, la interpretación, las soluciones, el listado
+   de relatos incluidos, y su nombre y cargo al final (configurables en
+   "Configuración").
 
 ## Stack
 
@@ -131,12 +137,24 @@ static/style.css  # estilos (misma identidad visual del prototipo Relacionai)
 data/             # base de datos SQLite (se crea sola al primer arranque)
 ```
 
+## Configuración (panel del encargado)
+
+En `/encargado/configuracion` el encargado puede:
+
+- Guardar su **nombre y cargo**, que aparecen al final de todo informe PDF descargado.
+- Subir el **reglamento interno** de la institución (Word, PDF o texto). A partir de ahí,
+  antes de sugerir soluciones Claude primero revisa qué indica el reglamento para casos
+  similares y lo señala explícitamente, y después agrega sugerencias propias según el caso.
+  Se aplica a todas las síntesis (nuevas y al volver a generar una existente) mientras el
+  reglamento esté cargado; se puede reemplazar o quitar en cualquier momento.
+
 ## Próximos pasos sugeridos
 
 - Integrarlo como módulo de GADUAI cuando corresponda.
 - Autenticación real por encargado (si hay más de una persona revisando
   casos) en vez de una sola contraseña compartida.
-- Cola de tareas en segundo plano (Celery/RQ) si el volumen de relatos crece,
-  para que subir un archivo no espere a que Claude termine de responder.
+- El procesamiento con Claude ya corre en un hilo en segundo plano (no bloquea
+  la confirmación a la persona); si el volumen de relatos crece mucho, migrar
+  a una cola de tareas real (Celery/RQ) para mayor robustez.
 - Notificar al encargado (correo/WhatsApp) cuando llega un relato nuevo, en
   vez de que tenga que revisar el panel manualmente.

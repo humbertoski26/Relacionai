@@ -76,6 +76,15 @@ CREATE TABLE IF NOT EXISTS historial (
     accion TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS configuracion (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    nombre_encargado TEXT,
+    cargo_encargado TEXT,
+    reglamento_nombre_archivo TEXT,
+    reglamento_texto TEXT,
+    reglamento_subido_en TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
 CREATE INDEX IF NOT EXISTS idx_historial_caso ON historial(caso_id);
 CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
@@ -97,9 +106,14 @@ def now_iso():
 @contextmanager
 def get_conn():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    # busy_timeout: ahora que el resumen/síntesis se procesa en un hilo en
+    # segundo plano, puede haber escrituras concurrentes (una petición nueva
+    # + un hilo terminando el caso anterior) — sin esto, sqlite podría lanzar
+    # "database is locked" en vez de simplemente esperar un poco.
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 8000")
     try:
         yield conn
         conn.commit()
@@ -114,6 +128,7 @@ def init_db():
             columnas = {row["name"] for row in conn.execute(f"PRAGMA table_info({tabla})")}
             if columna not in columnas:
                 conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
+        conn.execute("INSERT OR IGNORE INTO configuracion (id) VALUES (1)")
 
 
 def _slug_apellido(apellido: str) -> str:
@@ -361,3 +376,38 @@ def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
                 pass
         resultado.append(row)
     return resultado
+
+
+# --------------------------------------------------------------- configuración
+
+def obtener_configuracion():
+    """Fila única (id=1) con los datos del encargado y el reglamento interno subido."""
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM configuracion WHERE id = 1").fetchone()
+
+
+def guardar_datos_encargado(nombre: str, cargo: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE configuracion SET nombre_encargado = ?, cargo_encargado = ? WHERE id = 1",
+            ((nombre or "").strip() or None, (cargo or "").strip() or None),
+        )
+
+
+def guardar_reglamento(nombre_archivo: str, texto: str):
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = ?, reglamento_texto = ?, reglamento_subido_en = ?
+               WHERE id = 1""",
+            (nombre_archivo, texto, now_iso()),
+        )
+
+
+def quitar_reglamento():
+    with get_conn() as conn:
+        conn.execute(
+            """UPDATE configuracion
+               SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL
+               WHERE id = 1""",
+        )

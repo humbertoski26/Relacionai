@@ -3,6 +3,7 @@
 {% block topnav %}
 <div class="topnav">
   <a href="{{ url_for('encargado_dashboard') }}">← Todos los casos</a>
+  <a href="{{ url_for('encargado_configuracion') }}">Configuración</a>
   <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>
 {% endblock %}
@@ -86,17 +87,43 @@
 <script>
   var btnCopiar = document.getElementById('btn-copiar-link');
   if (btnCopiar) {
+    var original = btnCopiar.textContent;
+    var mostrarExito = function () {
+      btnCopiar.textContent = '¡Copiado! ✓';
+      btnCopiar.classList.add('btn-copiado');
+      setTimeout(function () {
+        btnCopiar.textContent = original;
+        btnCopiar.classList.remove('btn-copiado');
+      }, 2000);
+    };
+    var copiarConTextarea = function (link) {
+      try {
+        var temp = document.createElement('textarea');
+        temp.value = link;
+        temp.setAttribute('readonly', '');
+        temp.style.position = 'fixed';
+        temp.style.left = '-9999px';
+        document.body.appendChild(temp);
+        temp.focus();
+        temp.select();
+        temp.setSelectionRange(0, temp.value.length);
+        var ok = document.execCommand('copy');
+        document.body.removeChild(temp);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    };
     btnCopiar.addEventListener('click', function () {
       var link = btnCopiar.getAttribute('data-link');
-      var listo = function () {
-        var original = btnCopiar.textContent;
-        btnCopiar.textContent = 'Link copiado ✓';
-        setTimeout(function () { btnCopiar.textContent = original; }, 1800);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(link).then(listo).catch(function () { window.prompt('Copia el link:', link); });
+      if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(mostrarExito).catch(function () {
+          if (copiarConTextarea(link)) { mostrarExito(); } else { window.prompt('Copia el link manualmente:', link); }
+        });
+      } else if (copiarConTextarea(link)) {
+        mostrarExito();
       } else {
-        window.prompt('Copia el link:', link);
+        window.prompt('Copia el link manualmente:', link);
       }
     });
   }
@@ -133,7 +160,8 @@
 </div>
 {% else %}
 <div class="section card" style="padding:20px; color:var(--ink-muted); font-size:13.5px;">
-  Todavía no hay síntesis general — se genera automáticamente apenas llegue el primer relato, o puedes generarla manualmente con el botón de arriba.
+  Todavía no hay síntesis general — se genera automáticamente apenas llegue el primer relato (puede
+  tardar uno o dos minutos; recarga la página), o puedes generarla manualmente con el botón de arriba.
 </div>
 {% endif %}
 

@@ -111,9 +111,12 @@ def resumir_relato(texto: str) -> str:
         return f"[No se pudo generar el resumen automático: {exc}]"
 
 
-def sintetizar_caso(apellido: str, relatos: list) -> dict:
+def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") -> dict:
     """
     relatos: lista de dicts {nombre, formato, contenido, resumen}
+    reglamento_texto: texto del reglamento interno de la institución (opcional). Si se
+      entrega, las soluciones deben basarse primero en lo que dice el reglamento y luego
+      agregar sugerencias propias.
     Devuelve: {sintesis, interpretacion, problemas: [...], soluciones: [...], nivel_urgencia}
     """
     if not _api_key_configurada():
@@ -131,12 +134,31 @@ def sintetizar_caso(apellido: str, relatos: list) -> dict:
         bloques.append(f"--- Relato {i} (de: {r.get('nombre') or 'persona no identificada'}) ---\n{cuerpo[:4000]}")
     relatos_texto = "\n\n".join(bloques)[:40000]
 
+    reglamento_texto = (reglamento_texto or "").strip()
+    if reglamento_texto:
+        bloque_reglamento = (
+            "\n\nREGLAMENTO INTERNO DE LA INSTITUCIÓN (referencia obligatoria):\n\"\"\"\n"
+            + reglamento_texto[:20000] + "\n\"\"\"\n\n"
+            "Antes de proponer soluciones propias, revisa este reglamento y considera qué "
+            "establece sobre situaciones como la de este caso (procedimientos, plazos, "
+            "sanciones, protocolos de derivación, etc.). En la lista de \"soluciones\" del "
+            "JSON, ordénalas así: primero uno o más ítems que empiecen literalmente con "
+            "\"Según el reglamento interno: \" resumiendo lo que el reglamento indica para "
+            "este caso (si el reglamento no dice nada aplicable, incluye igual un ítem que "
+            "empiece con \"Según el reglamento interno: \" señalando que no encontraste algo "
+            "específico); luego, a continuación, agrega tus propias recomendaciones "
+            "adicionales (sin ese prefijo) según tu análisis del caso."
+        )
+    else:
+        bloque_reglamento = ""
+
     prompt = (
         "Eres una persona analista experta en relaciones interpersonales y convivencia, apoyando a "
         "quien coordina un caso. A continuación hay varios relatos personales recogidos sobre un mismo "
         "caso (identificado por el apellido «" + apellido + "»), posiblemente contados por distintas "
         "personas involucradas o testigos. Cada uno puede tener una versión distinta de los hechos.\n\n"
-        "RELATOS DEL CASO:\n\"\"\"\n" + relatos_texto + "\n\"\"\"\n\n"
+        "RELATOS DEL CASO:\n\"\"\"\n" + relatos_texto + "\n\"\"\"\n"
+        + bloque_reglamento + "\n"
         "Responde ÚNICAMENTE con un objeto JSON con esta forma exacta (sin texto fuera del JSON):\n"
         "{\n"
         '  "sintesis": "síntesis general del caso integrando todos los relatos, en 4 a 8 frases, '
