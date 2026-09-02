@@ -493,6 +493,36 @@ def test_alertas_dashboard():
         check("alertas: al completar el relato, desaparece del cuadro correspondiente", rotulo_verde not in verdes2)
 
 
+# ================================================================ TEST 4g-bis: destinatarios de casos SIN plazo no deben desaparecer
+def test_alertas_pendientes_sin_plazo():
+    with app.test_client() as c:
+        login(c)
+        # caso sin fecha limite definida — antes, sus destinatarios pendientes no aparecian
+        # en ningun cuadro de alerta (el filtro exigia c.fecha_limite IS NOT NULL)
+        c.post("/encargado/casos", data={"apellido": "SinPlazoAlerta"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "SinPlazoAlerta"][0]["rotulo"]
+        c.post(f"/encargado/casos/{rotulo}/destinatarios", data={"emails": "pendiente-sinplazo@colegio.cl"}, follow_redirects=True)
+
+        caso = models.obtener_caso(rotulo)
+        check("sin plazo: el caso efectivamente no tiene fecha limite", not caso["fecha_limite"])
+
+        pendientes = models.pendientes_por_urgencia()
+        rotulos_sin_plazo = {it["rotulo"] for it in pendientes["sin_plazo"]}
+        check("sin plazo: el destinatario pendiente aparece en el cuadro 'sin_plazo'", rotulo in rotulos_sin_plazo)
+        en_otro_cuadro = any(rotulo in {it["rotulo"] for it in pendientes[c2]} for c2 in ("rojo", "amarillo", "verde"))
+        check("sin plazo: no aparece duplicado en ningun cuadro con color", not en_otro_cuadro)
+
+        r = c.get("/encargado")
+        check("sin plazo: el escritorio carga con el cuarto cuadro 'sin_plazo'", b"alerta-sin_plazo" in r.data)
+        check("sin plazo: el correo pendiente aparece listado en el escritorio", b"pendiente-sinplazo@colegio.cl" in r.data)
+
+        # al completar el relato, tambien desaparece del cuadro sin_plazo
+        c.post(f"/caso/{rotulo}", data={"nombre": "Cumplidor Sin Plazo", "correo": "pendiente-sinplazo@colegio.cl", "relato": "Listo."}, follow_redirects=True)
+        pendientes2 = models.pendientes_por_urgencia()
+        rotulos_sin_plazo2 = {it["rotulo"] for it in pendientes2["sin_plazo"]}
+        check("sin plazo: al completar el relato, desaparece del cuadro 'sin_plazo'", rotulo not in rotulos_sin_plazo2)
+
+
 # ================================================================ TEST 4h: nombre del colegio
 def test_nombre_colegio():
     with app.test_client() as c:
@@ -661,6 +691,7 @@ if __name__ == "__main__":
         test_reglamento_retroactivo()
         test_mensajes_incluyen_plazo()
         test_alertas_dashboard()
+        test_alertas_pendientes_sin_plazo()
         test_nombre_colegio()
         test_datos_encargado_obligatorios()
         test_wizard_secuencia_reglamento_insignia()

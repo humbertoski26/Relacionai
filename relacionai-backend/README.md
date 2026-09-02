@@ -46,14 +46,18 @@ problemas identificados y soluciones posibles, en un informe descargable
    encargado puede recordarles manualmente con un botón, y además hay una
    tarea diaria automática que les reenvía un recordatorio si aún no
    completan su relato (ver "Recordatorios automáticos y purga" más abajo).
-   En el escritorio (`/encargado`), tres cuadros de alerta — rojo (falta 1
-   día o menos, incluye vencidos), amarillo (2 días) y verde (más de 2
-   días) — muestran cuántos destinatarios están pendientes según cuánto
-   falta para el plazo de su caso; cada cuadro se abre con un clic y lista
-   a las personas con acciones directas para copiar el link o reenviarlo
-   por WhatsApp/correo como recordatorio. Se recalculan solos en cada
-   carga de la página, así que un destinatario desaparece de un cuadro (o
-   cambia de color) apenas completa su relato o cambia el plazo.
+   En el escritorio (`/encargado`), cuatro cuadros de alerta — rojo (falta 1
+   día o menos, incluye vencidos), amarillo (2 días), verde (más de 2 días)
+   y un cuarto gris **"sin plazo definido"** — muestran cuántos destinatarios
+   están pendientes según cuánto falta para el plazo de su caso; el cuarto
+   cuadro es para cuando el caso todavía no tiene una fecha límite definida
+   (sin eso no hay cómo calcular la urgencia, pero la persona sigue
+   pendiente, así que no desaparece del escritorio: se agrupa aparte en vez
+   de no aparecer en ningún lado). Cada cuadro se abre con un clic y lista a
+   las personas con acciones directas para copiar el link o reenviarlo por
+   WhatsApp/correo como recordatorio. Se recalculan solos en cada carga de
+   la página, así que un destinatario desaparece de un cuadro (o cambia de
+   color) apenas completa su relato, se define/cambia el plazo del caso.
 5. Cada persona entra al link, escribe su nombre, **su correo (obligatorio,
    validado)** —para recibir una copia de su propio relato—, y sube su
    relato — como texto pegado, dictado por voz (botón de micrófono, revisable

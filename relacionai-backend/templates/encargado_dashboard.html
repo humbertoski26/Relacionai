@@ -14,14 +14,14 @@
 {% set urgentes = casos|selectattr('nivel_urgencia','equalto','alto')|list|length %}
 
 <div class="alertas-row">
-  {% for color, etiqueta in [('rojo', 'Pendientes — falta 1 día o menos'), ('amarillo', 'Pendientes — faltan 2 días'), ('verde', 'Pendientes — faltan más de 2 días')] %}
+  {% for color, etiqueta in [('rojo', 'Pendientes — falta 1 día o menos'), ('amarillo', 'Pendientes — faltan 2 días'), ('verde', 'Pendientes — faltan más de 2 días'), ('sin_plazo', 'Pendientes — sin plazo definido')] %}
   <details class="alerta-caja alerta-{{ color }}">
     <summary><span class="num">{{ pendientes[color]|length }}</span><span class="lbl">{{ etiqueta }}</span></summary>
     <div class="alerta-body">
       {% for it in pendientes[color] %}
       <div class="alerta-fila">
         <span>{{ it['email'] }} · <a href="{{ url_for('encargado_caso', rotulo=it['rotulo']) }}">{{ it['rotulo'] }}</a> ·
-          {% if it['dias_restantes'] < 0 %}Venció{% elif it['dias_restantes'] == 0 %}Hoy{% elif it['dias_restantes'] == 1 %}Mañana{% else %}{{ it['dias_restantes'] }} días{% endif %}</span>
+          {% if it['dias_restantes'] is none %}sin plazo{% elif it['dias_restantes'] < 0 %}Venció{% elif it['dias_restantes'] == 0 %}Hoy{% elif it['dias_restantes'] == 1 %}Mañana{% else %}{{ it['dias_restantes'] }} días{% endif %}</span>
         <span class="acciones">
           <button type="button" class="btn-copiar-generico" data-link="{{ it['link'] }}">Copiar</button>
           <a href="{{ it['link_whatsapp'] }}" target="_blank" rel="noopener">WhatsApp</a>

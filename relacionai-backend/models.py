@@ -409,37 +409,43 @@ def registrar_recordatorio_enviado(destinatario_id: int):
 
 
 def pendientes_por_urgencia():
-    """Destinatarios que aún no completan su relato, en casos abiertos con fecha límite
-    definida, agrupados por urgencia según los días que faltan para el plazo — para el
-    cuadro de alertas del escritorio del encargado. Se recalcula en cada carga de la
-    página (no se guarda aparte), así que siempre refleja el estado actual: al enviar un
-    link o completar un relato, el destinatario deja de aparecer o cambia de grupo solo.
+    """Destinatarios que aún no completan su relato, en casos abiertos, agrupados por
+    urgencia según los días que faltan para el plazo de su caso — para el cuadro de
+    alertas del escritorio del encargado. Se recalcula en cada carga de la página (no
+    se guarda aparte), así que siempre refleja el estado actual: al enviar un link o
+    completar un relato, el destinatario deja de aparecer o cambia de grupo solo.
 
     rojo: falta 1 día o menos (incluye vencidos). amarillo: faltan 2 días.
-    verde: faltan más de 2 días.
+    verde: faltan más de 2 días. sin_plazo: el caso aún no tiene fecha límite definida
+    — sin esto no hay cómo calcular la urgencia, pero el destinatario sigue pendiente,
+    así que se muestra igual en su propio cuadro en vez de desaparecer silenciosamente.
     """
     hoy = datetime.now().date()
-    resultado = {"rojo": [], "amarillo": [], "verde": []}
+    resultado = {"rojo": [], "amarillo": [], "verde": [], "sin_plazo": []}
     with get_conn() as conn:
         filas = conn.execute(
             """SELECT d.id AS destinatario_id, d.email AS email,
                       c.rotulo AS rotulo, c.apellido AS apellido, c.fecha_limite AS fecha_limite
                FROM destinatarios d
                JOIN casos c ON c.id = d.caso_id
-               WHERE d.cumplido_en IS NULL AND c.estado = 'abierto' AND c.fecha_limite IS NOT NULL
+               WHERE d.cumplido_en IS NULL AND c.estado = 'abierto'
                ORDER BY c.fecha_limite ASC"""
         ).fetchall()
     for f in filas:
-        try:
-            fecha_limite = datetime.strptime(f["fecha_limite"], "%Y-%m-%d").date()
-        except (ValueError, TypeError):
-            continue
-        dias_restantes = (fecha_limite - hoy).days
+        fecha_limite = None
+        if f["fecha_limite"]:
+            try:
+                fecha_limite = datetime.strptime(f["fecha_limite"], "%Y-%m-%d").date()
+            except ValueError:
+                fecha_limite = None
+        dias_restantes = (fecha_limite - hoy).days if fecha_limite else None
         item = {
             "destinatario_id": f["destinatario_id"], "email": f["email"], "rotulo": f["rotulo"],
             "apellido": f["apellido"], "fecha_limite": f["fecha_limite"], "dias_restantes": dias_restantes,
         }
-        if dias_restantes <= 1:
+        if dias_restantes is None:
+            resultado["sin_plazo"].append(item)
+        elif dias_restantes <= 1:
             resultado["rojo"].append(item)
         elif dias_restantes == 2:
             resultado["amarillo"].append(item)

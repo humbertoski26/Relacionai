@@ -109,7 +109,9 @@ def link_whatsapp(rotulo: str, apellido: str, descripcion: str = "", fecha_limit
     return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
 
 
-def _texto_dias_restantes(dias_restantes: int) -> str:
+def _texto_dias_restantes(dias_restantes) -> str:
+    if dias_restantes is None:
+        return "Todavía no has completado tu relato"
     if dias_restantes < 0:
         return "El plazo para tu relato ya venció"
     if dias_restantes == 0:
@@ -119,7 +121,7 @@ def _texto_dias_restantes(dias_restantes: int) -> str:
     return f"Quedan {dias_restantes} días para completar tu relato"
 
 
-def link_whatsapp_recordatorio(rotulo: str, dias_restantes: int) -> str:
+def link_whatsapp_recordatorio(rotulo: str, dias_restantes) -> str:
     mensaje = (
         f"Recordatorio — caso {rotulo}: {_texto_dias_restantes(dias_restantes)}. "
         f"Puedes completarlo aquí: {link_publico(rotulo)}"
@@ -127,7 +129,7 @@ def link_whatsapp_recordatorio(rotulo: str, dias_restantes: int) -> str:
     return "https://wa.me/?text=" + urllib.parse.quote(mensaje)
 
 
-def link_correo_recordatorio(rotulo: str, dias_restantes: int) -> str:
+def link_correo_recordatorio(rotulo: str, dias_restantes) -> str:
     asunto = f"Recordatorio — falta tu relato, caso {rotulo}"
     cuerpo = (
         f"Hola,\n\n{_texto_dias_restantes(dias_restantes)} en el caso {rotulo}.\n"
