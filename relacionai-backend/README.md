@@ -128,6 +128,13 @@ configurar nada aparte.
   (o cambia a Postgres si prefieres — el código de `models.py` es la única
   pieza que tocaría).
 - Haz respaldos periódicos de `data/relacionai.db` (contiene los relatos).
+- Los archivos subidos (relatos y reglamento interno) tienen un **límite de 8 MB** — a
+  propósito bajo, porque el plan gratuito de Render tiene poca memoria y un archivo muy
+  pesado (sobre todo un PDF escaneado como fotos de cada página) puede hacer que el proceso
+  se caiga por completo en vez de solo demorar más. Si alguien sube algo más pesado, ve un
+  mensaje explicándole que lo comprima o lo guarde como Word/PDF de texto (no como imágenes).
+  Si se necesita aceptar archivos más grandes, hay que subir el plan de Render a uno con más
+  memoria (el gratuito ronda los 512 MB).
 
 ## Estructura del proyecto
 

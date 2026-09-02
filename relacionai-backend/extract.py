@@ -18,6 +18,7 @@ class ExtractError(Exception):
 
 
 MAX_CHARS = 120_000  # tope de caracteres que guardamos por relato
+MAX_PDF_PAGINAS = 300  # tope de páginas a procesar, para no consumir memoria de más con PDFs enormes
 
 
 def extraer_texto(nombre_archivo: str, contenido_bytes: bytes) -> str:
@@ -78,7 +79,10 @@ def _extraer_pdf(data: bytes) -> str:
         except Exception:  # noqa: BLE001
             raise ExtractError("El PDF está protegido con contraseña; no se pudo leer.")
     partes = []
-    for pagina in lector.pages:
+    for i, pagina in enumerate(lector.pages):
+        if i >= MAX_PDF_PAGINAS:
+            partes.append("\n[se cortó la lectura por tener demasiadas páginas]")
+            break
         try:
             partes.append(pagina.extract_text() or "")
         except Exception:  # noqa: BLE001

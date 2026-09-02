@@ -33,7 +33,10 @@ from report_pdf import construir_informe_pdf
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 app.secret_key = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
-app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024  # 20 MB por archivo subido
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB por archivo subido — a propósito
+# bajo: el servidor gratuito tiene poca memoria, y un archivo muy pesado (sobre todo un PDF
+# escaneado como fotos de cada página) puede hacer que el proceso se caiga por completo
+# ("Internal Server Error") en vez de simplemente demorar más.
 
 ENCARGADO_PASSWORD = os.environ.get("ENCARGADO_PASSWORD", "relacionai")
 
@@ -156,6 +159,24 @@ def _procesar_reglamento_en_segundo_plano(texto: str):
         models.guardar_resumen_reglamento(resumen)
     except Exception:
         app.logger.exception("Error generando en segundo plano el resumen del reglamento interno.")
+
+
+@app.errorhandler(413)
+def error_archivo_grande(_exc):
+    """Se activa cuando el archivo subido supera MAX_CONTENT_LENGTH — evita que la persona
+    vea un error genérico del servidor y en vez de eso le explica qué hacer."""
+    flash(
+        "El archivo es demasiado pesado (el límite son 8 MB). Si es un PDF escaneado (fotos "
+        "de cada página), prueba comprimirlo o guardarlo como Word/PDF de texto en vez de "
+        "imágenes — así además el contenido se puede leer correctamente.",
+        "error",
+    )
+    if request.path.startswith("/encargado/configuracion/reglamento"):
+        return redirect(url_for("encargado_configuracion")), 302
+    partes = request.path.strip("/").split("/")
+    if request.path.startswith("/caso/") and len(partes) >= 2 and partes[1]:
+        return redirect(url_for("caso_publico", rotulo=partes[1])), 302
+    return redirect(url_for("home")), 302
 
 
 # ------------------------------------------------------------------ rutas
