@@ -15,7 +15,6 @@ Ver README.md para variables de entorno y despliegue.
 import functools
 import os
 import re
-import threading
 import urllib.parse
 from datetime import datetime
 
@@ -26,6 +25,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import models
+import tasks
 from claude_client import resumir_relato, resumir_reglamento, sintetizar_caso
 from email_client import (
     enviar_copia_relato,
@@ -53,8 +53,6 @@ app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB por archivo subido �
 # escaneado como fotos de cada página) puede hacer que el proceso se caiga por completo
 # ("Internal Server Error") en vez de simplemente demorar más.
 
-ENCARGADO_PASSWORD = os.environ.get("ENCARGADO_PASSWORD", "relacionai")
-
 models.init_db()
 
 
@@ -63,8 +61,21 @@ models.init_db()
 def login_requerido(vista):
     @functools.wraps(vista)
     def envoltura(*args, **kwargs):
-        if not session.get("encargado"):
+        if not session.get("usuario_id"):
             return redirect(url_for("encargado_login", next=request.path))
+        return vista(*args, **kwargs)
+    return envoltura
+
+
+def admin_requerido(vista):
+    """Como login_requerido, pero además exige que el usuario logueado sea administrador
+    — se usa en las rutas de gestión de usuarios (crear cuentas nuevas, desactivar)."""
+    @functools.wraps(vista)
+    def envoltura(*args, **kwargs):
+        if not session.get("usuario_id"):
+            return redirect(url_for("encargado_login", next=request.path))
+        if not session.get("usuario_admin"):
+            abort(403)
         return vista(*args, **kwargs)
     return envoltura
 
@@ -90,6 +101,16 @@ def inject_config_global():
         return {"config_global": models.obtener_configuracion()}
     except Exception:
         return {"config_global": None}
+
+
+@app.context_processor
+def inject_usuario_actual():
+    """Nombre y rol de quien está logueado — para mostrarlo en la barra superior del panel
+    y para decidir si se muestra el enlace a "Usuarios" (solo administradores)."""
+    return {
+        "usuario_actual_nombre": session.get("usuario_nombre"),
+        "usuario_actual_admin": bool(session.get("usuario_admin")),
+    }
 
 
 def link_publico(rotulo: str) -> str:
@@ -145,9 +166,11 @@ def link_correo_recordatorio(rotulo: str, dias_restantes) -> str:
 
 def actor_encargado() -> str:
     """Nombre a usar en el historial para acciones que hace la persona logueada como
-    encargado — usa el nombre configurado en Configuración si ya lo puso, para que quede
-    registro de qué persona hizo la acción (con un solo login compartido, es la mejor
-    aproximación sin construir cuentas individuales)."""
+    encargado — ahora que cada encargado tiene su propia cuenta (ver /encargado/usuarios),
+    usa el nombre de la sesión activa, que identifica exactamente quién hizo la acción."""
+    nombre = session.get("usuario_nombre")
+    if nombre:
+        return nombre
     config = models.obtener_configuracion()
     nombre = config["nombre_encargado"] if config else None
     return nombre or "Encargado de convivencia"
@@ -215,7 +238,8 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
         config = models.obtener_configuracion()
         correo_encargado = config["correo_encargado"] if config else None
         if caso and correo_encargado:
-            enviar_notificacion_relato_nuevo(correo_encargado, rotulo, caso["apellido"], nombre, link_caso_privado)
+            nombre_colegio = (config["nombre_colegio"] if config else "") or ""
+            enviar_notificacion_relato_nuevo(correo_encargado, rotulo, caso["apellido"], nombre, link_caso_privado, nombre_colegio=nombre_colegio)
     except Exception:
         app.logger.exception("Error avisando al encargado del nuevo relato en el caso %s", rotulo)
 
@@ -279,6 +303,18 @@ def _procesar_reglamento_en_segundo_plano(nombre_archivo: str, contenido_bytes: 
                 app.logger.exception("Error re-sintetizando el caso %s tras cargar el reglamento", c["rotulo"])
 
 
+def _enviar_respaldo_informe_en_segundo_plano(correo_encargado: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str, dias_retencion: int):
+    """Se ejecuta en segundo plano al descargar el informe final: le manda una copia por
+    correo al encargado como respaldo. Es una función de nivel de módulo (no un closure)
+    para poder encolarse en una cola de tareas real (ver tasks.py) además de en un hilo."""
+    try:
+        config = models.obtener_configuracion()
+        nombre_colegio = config["nombre_colegio"] if config else ""
+        enviar_informe_encargado(correo_encargado, rotulo, apellido, docx_bytes, nombre_archivo, dias_retencion, nombre_colegio=nombre_colegio or "")
+    except Exception:
+        app.logger.exception("Error enviando el respaldo del informe del caso %s a %s", rotulo, correo_encargado)
+
+
 @app.errorhandler(413)
 def error_archivo_grande(_exc):
     """Se activa cuando el archivo subido supera MAX_CONTENT_LENGTH — evita que la persona
@@ -301,7 +337,7 @@ def error_archivo_grande(_exc):
 
 @app.route("/")
 def home():
-    if session.get("encargado"):
+    if session.get("usuario_id"):
         return redirect(url_for("encargado_dashboard"))
     return redirect(url_for("encargado_login"))
 
@@ -311,18 +347,102 @@ def home():
 @app.route("/encargado/login", methods=["GET", "POST"])
 def encargado_login():
     if request.method == "POST":
-        if request.form.get("password") == ENCARGADO_PASSWORD:
-            session["encargado"] = True
+        email = (request.form.get("email") or "").strip()
+        password = request.form.get("password") or ""
+        usuario = models.verificar_login(email, password)
+        if usuario:
+            session["usuario_id"] = usuario["id"]
+            session["usuario_nombre"] = usuario["nombre"]
+            session["usuario_admin"] = usuario["es_admin"]
             destino = request.args.get("next") or url_for("encargado_dashboard")
             return redirect(destino)
-        flash("Contraseña incorrecta.", "error")
+        flash("Correo o contraseña incorrectos, o la cuenta está desactivada.", "error")
     return render_template("encargado_login.html")
 
 
 @app.route("/encargado/logout")
 def encargado_logout():
-    session.pop("encargado", None)
+    session.pop("usuario_id", None)
+    session.pop("usuario_nombre", None)
+    session.pop("usuario_admin", None)
     return redirect(url_for("encargado_login"))
+
+
+# --- usuarios (cuentas del equipo de convivencia) -----------------------
+
+@app.route("/encargado/usuarios")
+@admin_requerido
+def encargado_usuarios():
+    return render_template("encargado_usuarios.html", usuarios=models.listar_usuarios())
+
+
+@app.route("/encargado/usuarios/nuevo", methods=["POST"])
+@admin_requerido
+def encargado_crear_usuario():
+    nombre = (request.form.get("nombre") or "").strip()
+    email = (request.form.get("email") or "").strip()
+    password = request.form.get("password") or ""
+    es_admin = request.form.get("es_admin") == "on"
+    if not nombre or not email:
+        flash("Completa el nombre y el correo de la nueva cuenta.", "error")
+        return redirect(url_for("encargado_usuarios"))
+    if not correo_valido(email):
+        flash("Ese correo no parece válido.", "error")
+        return redirect(url_for("encargado_usuarios"))
+    try:
+        models.crear_usuario(nombre, email, password, es_admin=es_admin)
+    except ValueError as exc:
+        mensajes = {
+            "password_muy_corta": "La contraseña debe tener al menos 6 caracteres.",
+            "email_ya_registrado": "Ya existe una cuenta con ese correo.",
+            "email_requerido": "El correo es obligatorio.",
+        }
+        flash(mensajes.get(str(exc), "No se pudo crear la cuenta."), "error")
+        return redirect(url_for("encargado_usuarios"))
+    flash(f"Cuenta creada para {nombre} ({email}).", "ok")
+    return redirect(url_for("encargado_usuarios"))
+
+
+@app.route("/encargado/usuarios/<int:usuario_id>/activar", methods=["POST"])
+@admin_requerido
+def encargado_activar_usuario(usuario_id):
+    models.set_usuario_activo(usuario_id, True)
+    flash("Cuenta reactivada.", "ok")
+    return redirect(url_for("encargado_usuarios"))
+
+
+@app.route("/encargado/usuarios/<int:usuario_id>/desactivar", methods=["POST"])
+@admin_requerido
+def encargado_desactivar_usuario(usuario_id):
+    if usuario_id == session.get("usuario_id"):
+        flash("No puedes desactivar tu propia cuenta mientras tienes la sesión abierta.", "error")
+        return redirect(url_for("encargado_usuarios"))
+    models.set_usuario_activo(usuario_id, False)
+    flash("Cuenta desactivada — esa persona ya no podrá entrar al panel.", "ok")
+    return redirect(url_for("encargado_usuarios"))
+
+
+@app.route("/encargado/mi-cuenta/password", methods=["POST"])
+@login_requerido
+def encargado_cambiar_password():
+    """Cualquier usuario logueado puede cambiar su propia contraseña (no hace falta ser
+    administrador) — un administrador puede además crear/desactivar cuentas de otras
+    personas en /encargado/usuarios."""
+    actual = request.form.get("password_actual") or ""
+    nueva = request.form.get("password_nueva") or ""
+    # verificar_login necesita el email; lo tomamos del usuario logueado en vez de pedirlo
+    # de nuevo en el formulario.
+    usuario_actual = models.obtener_usuario(session.get("usuario_id"))
+    if not usuario_actual or not models.verificar_login(usuario_actual["email"], actual):
+        flash("Tu contraseña actual no es correcta.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    try:
+        models.cambiar_password(session["usuario_id"], nueva)
+    except ValueError:
+        flash("La contraseña nueva debe tener al menos 6 caracteres.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    flash("Contraseña actualizada.", "ok")
+    return redirect(url_for("encargado_configuracion"))
 
 
 # --- panel del encargado ----------------------------------------------
@@ -416,11 +536,7 @@ def encargado_subir_reglamento():
     # _procesar_reglamento_en_segundo_plano — para no dejar esperando al encargado ni
     # arriesgar que el servidor corte la respuesta a mitad de camino.
     models.guardar_reglamento_pendiente(nombre_archivo)
-    threading.Thread(
-        target=_procesar_reglamento_en_segundo_plano,
-        args=(nombre_archivo, contenido_bytes),
-        daemon=True,
-    ).start()
+    tasks.encolar(_procesar_reglamento_en_segundo_plano, nombre_archivo, contenido_bytes)
     flash("Reglamento interno subido y en estudio — recarga esta página en unos segundos para ver la confirmación de que Claude ya lo estudió.", "ok")
     return redirect(url_for("encargado_configuracion"))
 
@@ -644,8 +760,8 @@ def encargado_sintetizar(rotulo):
     # Se hace en segundo plano (mismo motivo que el envío de relatos): la llamada a
     # Claude puede tardar bastante y no conviene dejar esperando al encargado ni
     # arriesgar que el servidor la corte a mitad de camino.
-    threading.Thread(target=_sintetizar_en_segundo_plano, args=(rotulo,), daemon=True).start()
-    models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Solicitó actualizar manualmente la síntesis general del caso.")
+    tasks.encolar(_sintetizar_en_segundo_plano, rotulo)
+    models.registrar_historial(rotulo, actor=actor_encargado(), accion="Solicitó actualizar manualmente la síntesis general del caso.")
     flash("Actualizando la síntesis general — recarga esta página en unos segundos para ver el resultado.", "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
@@ -677,12 +793,7 @@ def encargado_informe(rotulo):
 
     correo_encargado = config["correo_encargado"] if config else None
     if era_abierto and correo_encargado:
-        def _enviar_respaldo_informe():
-            try:
-                enviar_informe_encargado(correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo, dias_retencion)
-            except Exception:
-                app.logger.exception("Error enviando el respaldo del informe del caso %s a %s", rotulo, correo_encargado)
-        threading.Thread(target=_enviar_respaldo_informe, daemon=True).start()
+        tasks.encolar(_enviar_respaldo_informe_en_segundo_plano, correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo, dias_retencion)
 
     from io import BytesIO
     return send_file(
@@ -711,7 +822,7 @@ def encargado_descargar_relato(rotulo, relato_id):
         abort(404)
 
     numero = _numerar_relatos(models.listar_relatos(rotulo)).get(relato_id)
-    docx_bytes = construir_relato_docx(caso, relato, numero=numero)
+    docx_bytes = construir_relato_docx(caso, relato, numero=numero, configuracion=models.obtener_configuracion())
     sufijo_numero = f"-relato{numero}" if numero else ""
     nombre_archivo = f"relato_{_slug_archivo(relato['nombre_persona'])}{sufijo_numero}_{rotulo}.docx"
 
@@ -787,11 +898,7 @@ def caso_publico_enviar(rotulo):
     # puede tardar bastante — se hace en segundo plano para que la persona vea la
     # confirmación de inmediato en vez de tener que esperar. El link privado se arma acá
     # (con contexto de request todavía disponible) y se pasa ya armado al hilo.
-    threading.Thread(
-        target=_procesar_relato_en_segundo_plano,
-        args=(rotulo, relato_id, contenido, nombre, correo, link_caso_privado(rotulo)),
-        daemon=True,
-    ).start()
+    tasks.encolar(_procesar_relato_en_segundo_plano, rotulo, relato_id, contenido, nombre, correo, link_caso_privado(rotulo))
 
     return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo)
 

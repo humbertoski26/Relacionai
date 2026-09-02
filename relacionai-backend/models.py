@@ -17,6 +17,7 @@ Un SQLite por despliegue (archivo en data/relacionai.db). Cuatro tablas:
 """
 
 import json
+import os
 import random
 import re
 import sqlite3
@@ -26,9 +27,97 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from werkzeug.security import check_password_hash, generate_password_hash
+
 DB_PATH = Path(__file__).parent / "data" / "relacionai.db"
 
-SCHEMA = """
+# --------------------------------------------------------------------------
+# Backend de base de datos: SQLite (por defecto) o Postgres.
+#
+# Sin configurar nada, todo sigue igual que antes: un archivo SQLite en
+# data/relacionai.db. Esto es suficiente para un colegio piloto, pero en
+# Render el disco del servicio web no es persistente de verdad salvo que se
+# le agregue un disco aparte — y aun con disco, un solo archivo SQLite no
+# tiene backups automáticos ni tolera bien más de un proceso escribiendo a la
+# vez. Antes de vender a colegios reales, definir DATABASE_URL (al agregar
+# una base de datos Postgres, por ejemplo en Render) hace que la app use esa
+# base en su lugar — con backups y sin depender del disco del servidor web.
+#
+# El resto de este archivo llama siempre conn.execute(sql_con_signos_de_interrogación,
+# params); esta sección traduce el `?` a `%s` cuando corresponde y hace que
+# las filas de Postgres se accedan igual que las de sqlite3.Row (fila["columna"]).
+# --------------------------------------------------------------------------
+
+DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
+USANDO_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
+
+if USANDO_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+
+    # Render (y otros proveedores) entregan "postgres://"; psycopg2 moderno acepta
+    # ambos esquemas, pero lo normalizamos igual por si se usa una versión vieja.
+    _PG_DSN = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+_PLACEHOLDER_RE = re.compile(r"\?")
+
+
+def _traducir_placeholders(sql: str) -> str:
+    return _PLACEHOLDER_RE.sub("%s", sql)
+
+
+class _ConexionPostgres:
+    """Envuelve una conexión de psycopg2 para que el resto de models.py pueda
+    seguir escribiendo conn.execute(sql, params).fetchone()/.fetchall() exactamente
+    igual que con sqlite3.Connection — incluida la traducción automática de los
+    placeholders `?` a `%s` que usa psycopg2."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(_traducir_placeholders(sql), params)
+        return cur
+
+    def executescript(self, sql):
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        cur.close()
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+
+def _insertar_y_obtener_id(conn, sql_insert: str, params) -> int:
+    """INSERT que además necesita el id autogenerado de la fila nueva — en SQLite se
+    consulta aparte con last_insert_rowid(), en Postgres se pide con RETURNING id en
+    el mismo INSERT (last_insert_rowid() no existe ahí)."""
+    if USANDO_POSTGRES:
+        fila = conn.execute(sql_insert + " RETURNING id", params).fetchone()
+        return fila["id"]
+    conn.execute(sql_insert, params)
+    return conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+
+def _columnas_existentes(conn, tabla: str) -> set:
+    if USANDO_POSTGRES:
+        filas = conn.execute(
+            "SELECT column_name AS name FROM information_schema.columns WHERE table_name = ?",
+            (tabla,),
+        ).fetchall()
+    else:
+        filas = conn.execute(f"PRAGMA table_info({tabla})").fetchall()
+    return {row["name"] for row in filas}
+
+
+SCHEMA_SQLITE = """
 CREATE TABLE IF NOT EXISTS casos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     rotulo TEXT UNIQUE NOT NULL,
@@ -87,10 +176,28 @@ CREATE TABLE IF NOT EXISTS configuracion (
     reglamento_resumen TEXT
 );
 
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    es_admin INTEGER NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1,
+    creado_en TEXT NOT NULL,
+    ultimo_ingreso_en TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
 CREATE INDEX IF NOT EXISTS idx_historial_caso ON historial(caso_id);
 CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
 """
+
+# Misma estructura, solo cambia cómo se declara un id autoincremental — se genera a
+# partir del mismo texto de arriba para que las dos versiones no se desalineen con
+# el tiempo.
+SCHEMA_POSTGRES = SCHEMA_SQLITE.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+
+SCHEMA = SCHEMA_POSTGRES if USANDO_POSTGRES else SCHEMA_SQLITE
 
 # Migración ligera: columnas agregadas después del primer despliegue.
 # ALTER TABLE ... ADD COLUMN es seguro de repetir (se salta si ya existe),
@@ -115,6 +222,10 @@ _MIGRATIONS = [
 
 DIAS_RETENCION_DEFECTO = 15
 
+# BLOB (SQLite) es BYTEA en Postgres — el resto de los tipos usados acá (TEXT,
+# INTEGER) son válidos en ambos motores tal cual.
+_TIPOS_POSTGRES = {"BLOB": "BYTEA"}
+
 
 def now_iso():
     return datetime.now(timezone.utc).isoformat()
@@ -122,6 +233,18 @@ def now_iso():
 
 @contextmanager
 def get_conn():
+    if USANDO_POSTGRES:
+        conn = _ConexionPostgres(psycopg2.connect(_PG_DSN))
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+        return
+
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     # busy_timeout: ahora que el resumen/síntesis se procesa en un hilo en
     # segundo plano, puede haber escrituras concurrentes (una petición nueva
@@ -142,10 +265,15 @@ def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
         for tabla, columna, tipo in _MIGRATIONS:
-            columnas = {row["name"] for row in conn.execute(f"PRAGMA table_info({tabla})")}
+            columnas = _columnas_existentes(conn, tabla)
             if columna not in columnas:
-                conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo}")
-        conn.execute("INSERT OR IGNORE INTO configuracion (id) VALUES (1)")
+                tipo_real = _TIPOS_POSTGRES.get(tipo, tipo) if USANDO_POSTGRES else tipo
+                conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {columna} {tipo_real}")
+        if USANDO_POSTGRES:
+            conn.execute("INSERT INTO configuracion (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
+        else:
+            conn.execute("INSERT OR IGNORE INTO configuracion (id) VALUES (1)")
+    _asegurar_usuario_inicial()
 
 
 def _slug_apellido(apellido: str) -> str:
@@ -159,7 +287,7 @@ def _random_suffix(n=4):
     return "".join(random.choices(string.ascii_uppercase + string.digits, k=n))
 
 
-def crear_caso(apellido: str, titulo: str = "", creado_por: str = "encargado") -> sqlite3.Row:
+def crear_caso(apellido: str, titulo: str = "", creado_por: str = "encargado"):
     fecha = datetime.now().strftime("%Y%m%d")
     with get_conn() as conn:
         while True:
@@ -255,12 +383,12 @@ def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archi
     if not caso:
         raise ValueError("caso_no_encontrado")
     with get_conn() as conn:
-        conn.execute(
+        relato_id = _insertar_y_obtener_id(
+            conn,
             """INSERT INTO relatos (caso_id, nombre_persona, formato_entrada, archivo_original, contenido, subido_en, correo_persona)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (caso["id"], nombre_persona.strip(), formato_entrada, archivo_original, contenido, now_iso(), (correo_persona or "").strip() or None),
         )
-        relato_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
     registrar_historial(
         rotulo,
         actor=nombre_persona.strip() or "Persona anónima",
@@ -369,11 +497,11 @@ def agregar_destinatarios(rotulo: str, emails: list, actor: str = "Encargado de 
         for email in limpios:
             if email in existentes:
                 continue
-            conn.execute(
+            row_id = _insertar_y_obtener_id(
+                conn,
                 "INSERT INTO destinatarios (caso_id, email, invitado_en) VALUES (?, ?, ?)",
                 (caso["id"], email, now_iso()),
             )
-            row_id = conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
             creados.append(conn.execute("SELECT * FROM destinatarios WHERE id = ?", (row_id,)).fetchone())
 
     for d in creados:
@@ -675,3 +803,119 @@ def purgar_caso(rotulo: str, dias: int = None):
         rotulo, actor="Sistema",
         accion=f"Se cumplieron los {dias} días desde el informe: se eliminó el contenido de los relatos y la síntesis ({n_relatos} relato(s)); queda solo este historial como respaldo estadístico.",
     )
+
+
+# --------------------------------------------------------------- usuarios (autenticación)
+#
+# Antes había una sola contraseña compartida (variable de entorno ENCARGADO_PASSWORD)
+# para todo el equipo de convivencia escolar — cómodo para partir, pero no permite saber
+# qué persona hizo cada acción (el historial usaba el nombre escrito a mano en
+# "Datos del encargado" como aproximación) ni desactivar el acceso de alguien que deja
+# el cargo sin cambiarle la contraseña a todos los demás.
+#
+# _asegurar_usuario_inicial() migra sola la primera vez: si todavía no hay ningún
+# usuario, crea uno con la contraseña que ya se usaba (ENCARGADO_PASSWORD, o "relacionai"
+# si no se configuró nada) para que el equipo pueda seguir entrando exactamente igual que
+# antes y crear las demás cuentas ya logueado, en vez de quedar bloqueados por la
+# migración.
+
+ENCARGADO_PASSWORD_LEGADO = os.environ.get("ENCARGADO_PASSWORD", "relacionai")
+
+
+def _fila_usuario_a_dict(fila) -> dict:
+    return {
+        "id": fila["id"],
+        "nombre": fila["nombre"],
+        "email": fila["email"],
+        "es_admin": bool(fila["es_admin"]),
+        "activo": bool(fila["activo"]),
+        "creado_en": fila["creado_en"],
+        "ultimo_ingreso_en": fila["ultimo_ingreso_en"],
+    }
+
+
+def hay_usuarios() -> bool:
+    with get_conn() as conn:
+        fila = conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone()
+        return bool(fila and fila["n"])
+
+
+def _asegurar_usuario_inicial():
+    """Se llama al iniciar la app (init_db). No hace nada si ya existe algún usuario."""
+    if hay_usuarios():
+        return
+    config = obtener_configuracion()
+    nombre = (config["nombre_encargado"] if config else None) or "Encargado de convivencia"
+    email = (config["correo_encargado"] if config else None) or "encargado@relacionai.local"
+    try:
+        crear_usuario(nombre, email, ENCARGADO_PASSWORD_LEGADO, es_admin=True)
+    except ValueError:
+        # email raro que ya existía por alguna razón — no debería pasar en una base nueva,
+        # pero si pasa, igual dejamos un admin utilizable con un correo de respaldo.
+        crear_usuario(nombre, "encargado@relacionai.local", ENCARGADO_PASSWORD_LEGADO, es_admin=True)
+
+
+def crear_usuario(nombre: str, email: str, password: str, es_admin: bool = False) -> dict:
+    nombre = (nombre or "").strip() or "Encargado de convivencia"
+    email = (email or "").strip().lower()
+    if not email:
+        raise ValueError("email_requerido")
+    if not password or len(password) < 6:
+        raise ValueError("password_muy_corta")
+    with get_conn() as conn:
+        existente = conn.execute("SELECT 1 FROM usuarios WHERE email = ?", (email,)).fetchone()
+        if existente:
+            raise ValueError("email_ya_registrado")
+        usuario_id = _insertar_y_obtener_id(
+            conn,
+            """INSERT INTO usuarios (nombre, email, password_hash, es_admin, activo, creado_en)
+               VALUES (?, ?, ?, ?, 1, ?)""",
+            (nombre, email, generate_password_hash(password), 1 if es_admin else 0, now_iso()),
+        )
+        fila = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+    return _fila_usuario_a_dict(fila)
+
+
+def listar_usuarios() -> list:
+    with get_conn() as conn:
+        filas = conn.execute("SELECT * FROM usuarios ORDER BY creado_en ASC").fetchall()
+    return [_fila_usuario_a_dict(f) for f in filas]
+
+
+def obtener_usuario(usuario_id: int):
+    with get_conn() as conn:
+        fila = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
+    return _fila_usuario_a_dict(fila) if fila else None
+
+
+def verificar_login(email: str, password: str):
+    """Devuelve el usuario (dict) si el correo y la contraseña son correctos y la cuenta
+    está activa; None en cualquier otro caso (correo desconocido, contraseña incorrecta,
+    o cuenta desactivada)."""
+    email = (email or "").strip().lower()
+    if not email or not password:
+        return None
+    with get_conn() as conn:
+        fila = conn.execute("SELECT * FROM usuarios WHERE email = ?", (email,)).fetchone()
+    if not fila or not fila["activo"]:
+        return None
+    if not check_password_hash(fila["password_hash"], password):
+        return None
+    with get_conn() as conn:
+        conn.execute("UPDATE usuarios SET ultimo_ingreso_en = ? WHERE id = ?", (now_iso(), fila["id"]))
+    return _fila_usuario_a_dict(fila)
+
+
+def cambiar_password(usuario_id: int, password_nueva: str):
+    if not password_nueva or len(password_nueva) < 6:
+        raise ValueError("password_muy_corta")
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE usuarios SET password_hash = ? WHERE id = ?",
+            (generate_password_hash(password_nueva), usuario_id),
+        )
+
+
+def set_usuario_activo(usuario_id: int, activo: bool):
+    with get_conn() as conn:
+        conn.execute("UPDATE usuarios SET activo = ? WHERE id = ?", (1 if activo else 0, usuario_id))

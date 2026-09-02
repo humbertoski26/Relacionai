@@ -2,6 +2,9 @@
 {% block title %}Panel del encargado — RelacionAI{% endblock %}
 {% block topnav %}
 <div class="topnav">
+  {% if usuario_actual_admin %}
+  <a href="{{ url_for('encargado_usuarios') }}">Usuarios</a>
+  {% endif %}
   <a class="btn-icon" href="{{ url_for('encargado_configuracion') }}" title="Configuración" aria-label="Configuración">⚙</a>
   <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>

@@ -57,8 +57,8 @@ appmod.enviar_invitacion = lambda email, rotulo, link, fecha_limite="", mensaje=
 appmod.enviar_recordatorio = lambda *a, **k: _fake_enviar(a[0], "recordatorio", "")
 
 _informes_enviados = []
-def _fake_enviar_informe(email, rotulo, apellido, docx_bytes, nombre_archivo, dias_retencion=15):
-    _informes_enviados.append((email, rotulo, nombre_archivo, len(docx_bytes), dias_retencion))
+def _fake_enviar_informe(email, rotulo, apellido, docx_bytes, nombre_archivo, dias_retencion=15, nombre_colegio=""):
+    _informes_enviados.append((email, rotulo, nombre_archivo, len(docx_bytes), dias_retencion, nombre_colegio))
     return True
 appmod.enviar_informe_encargado = _fake_enviar_informe
 
@@ -74,7 +74,11 @@ def check(nombre, cond, detalle=""):
 
 
 def login(client):
-    return client.post("/encargado/login", data={"password": "relacionai"}, follow_redirects=True)
+    return client.post(
+        "/encargado/login",
+        data={"email": "encargado@relacionai.local", "password": "relacionai"},
+        follow_redirects=True,
+    )
 
 
 # ================================================================ TEST 1
@@ -200,7 +204,7 @@ def test_flujo_caso_completo():
         check("beacon: registra en historial quien comparte", r.status_code == 200)
         historial = models.listar_historial(rotulo)
         check("beacon: aparece 'Compartió el link por WhatsApp' en historial", any("WhatsApp" in h["accion"] for h in historial))
-        check("beacon: actor es el nombre del encargado configurado", any(h["actor"] == "Marcela Soto" for h in historial))
+        check("beacon: actor es el nombre de la cuenta logueada", any(h["actor"] == "Encargado de convivencia" for h in historial))
 
         # publico: caso abierto visible
         r = c.get(f"/caso/{rotulo}")
@@ -678,6 +682,12 @@ def test_descargar_relato_individual():
         r = c.get(f"/encargado/casos/{rotulo}")
         check("descarga relato: boton de descarga individual visible en la pagina del caso", "Descargar este relato".encode() in r.data)
 
+        # el nombre del colegio (configurado en test_nombre_colegio) aparece en el docx del relato
+        r = c.get(f"/encargado/casos/{rotulo}/relatos/{relato['id']}/descargar")
+        from docx import Document as _Doc
+        texto_docx = "\n".join(p.text for p in _Doc(io.BytesIO(r.data)).paragraphs)
+        check("descarga relato: el nombre del colegio aparece en el documento", "Colegio San Andrés" in texto_docx)
+
 
 # ================================================================ TEST 4o: aviso al encargado cuando llega un relato nuevo
 def test_notificacion_relato_nuevo():
@@ -691,6 +701,7 @@ def test_notificacion_relato_nuevo():
 
         avisos = [x for x in _correos_enviados[n_antes:] if x[0] == "marcela@colegio.cl" and "Nuevo relato recibido" in x[1]]
         check("aviso encargado: se envia un correo al encargado avisando el relato nuevo", len(avisos) == 1)
+        check("aviso encargado: el asunto incluye el nombre del colegio", avisos and "[Colegio San Andrés]" in avisos[0][1])
 
         historial = models.listar_historial(rotulo)
         check("aviso encargado: el resto del flujo del relato sigue funcionando bien", any("Subió un relato" in h["accion"] for h in historial))
@@ -762,6 +773,103 @@ def test_informe_sin_correo_encargado():
         check("informe sin correo encargado: no intenta enviar copia (no hay destino)", len(_informes_enviados) == n_antes)
 
 
+# ================================================================ TEST 7: autenticación real por encargado (usuarios)
+def test_autenticacion_multiusuario():
+    with app.test_client() as c:
+        r = c.post("/encargado/login", data={"email": "encargado@relacionai.local", "password": "clave-mala"}, follow_redirects=True)
+        check("login: contraseña incorrecta no entra", b"Correo o contrase" in r.data)
+
+        r = c.post("/encargado/login", data={"email": "noexiste@x.cl", "password": "cualquiera"}, follow_redirects=True)
+        check("login: correo desconocido no entra", b"Correo o contrase" in r.data)
+
+        login(c)
+        r = c.get("/encargado")
+        check("login: la cuenta inicial (migrada de ENCARGADO_PASSWORD) entra bien", r.status_code == 200)
+
+        # crear una cuenta nueva, no-admin
+        r = c.post("/encargado/usuarios/nuevo", data={
+            "nombre": "Marcela Soto", "email": "marcela@colegio.cl", "password": "clave123",
+        }, follow_redirects=True)
+        check("usuarios: cuenta nueva creada", any(u["email"] == "marcela@colegio.cl" for u in models.listar_usuarios()))
+        nueva = [u for u in models.listar_usuarios() if u["email"] == "marcela@colegio.cl"][0]
+        check("usuarios: cuenta nueva no es admin por defecto", nueva["es_admin"] is False)
+
+        # contraseña muy corta rechazada
+        r = c.post("/encargado/usuarios/nuevo", data={
+            "nombre": "Corta", "email": "corta@colegio.cl", "password": "123",
+        }, follow_redirects=True)
+        check("usuarios: contraseña muy corta rechazada", not any(u["email"] == "corta@colegio.cl" for u in models.listar_usuarios()))
+
+        # correo duplicado rechazado
+        r = c.post("/encargado/usuarios/nuevo", data={
+            "nombre": "Otra Marcela", "email": "marcela@colegio.cl", "password": "clave456",
+        }, follow_redirects=True)
+        check("usuarios: correo duplicado rechazado", b"Ya existe una cuenta" in r.data)
+
+    # la cuenta nueva puede entrar con su propia contraseña, y sus acciones quedan a su nombre
+    with app.test_client() as c2:
+        r = c2.post("/encargado/login", data={"email": "marcela@colegio.cl", "password": "clave123"}, follow_redirects=True)
+        check("usuarios: la cuenta nueva puede iniciar sesión", r.status_code == 200 and b"Cerrar sesi" in r.data)
+        c2.post("/encargado/casos", data={"apellido": "DeMarcela"}, follow_redirects=True)
+        casos = [x for x in models.listar_casos() if x["apellido"] == "DeMarcela"]
+        historial = models.listar_historial(casos[0]["rotulo"])
+        check("usuarios: el historial queda a nombre de quien está logueado", any(h["actor"] == "Marcela Soto" for h in historial))
+
+        # una cuenta no-admin no puede gestionar usuarios
+        r = c2.get("/encargado/usuarios")
+        check("usuarios: una cuenta no-admin no puede entrar a /encargado/usuarios", r.status_code == 403)
+
+        # cambio de contraseña propio: actual incorrecta se rechaza
+        r = c2.post("/encargado/mi-cuenta/password", data={"password_actual": "mala", "password_nueva": "nuevaclave1"}, follow_redirects=True)
+        check("usuarios: cambio de password rechaza contraseña actual incorrecta", b"no es correcta" in r.data)
+
+        # cambio de contraseña propio: correcto
+        c2.post("/encargado/mi-cuenta/password", data={"password_actual": "clave123", "password_nueva": "nuevaclave1"}, follow_redirects=True)
+        check("usuarios: login con la contraseña vieja ya no funciona", models.verificar_login("marcela@colegio.cl", "clave123") is None)
+        check("usuarios: login con la contraseña nueva funciona", models.verificar_login("marcela@colegio.cl", "nuevaclave1") is not None)
+
+    with app.test_client() as c3:
+        login(c3)  # admin
+        marcela = [u for u in models.listar_usuarios() if u["email"] == "marcela@colegio.cl"][0]
+
+        # el admin no puede desactivar su propia cuenta logueada
+        admin_actual = [u for u in models.listar_usuarios() if u["email"] == "encargado@relacionai.local"][0]
+        r = c3.post(f"/encargado/usuarios/{admin_actual['id']}/desactivar", follow_redirects=True)
+        check("usuarios: el admin no puede autodesactivarse", models.obtener_usuario(admin_actual["id"])["activo"] is True)
+
+        # el admin desactiva la cuenta de Marcela
+        c3.post(f"/encargado/usuarios/{marcela['id']}/desactivar", follow_redirects=True)
+        check("usuarios: cuenta desactivada queda inactiva", models.obtener_usuario(marcela["id"])["activo"] is False)
+
+    with app.test_client() as c4:
+        r = c4.post("/encargado/login", data={"email": "marcela@colegio.cl", "password": "nuevaclave1"}, follow_redirects=True)
+        check("usuarios: cuenta desactivada no puede iniciar sesión", b"Correo o contrase" in r.data)
+
+    with app.test_client() as c5:
+        login(c5)
+        marcela = [u for u in models.listar_usuarios() if u["email"] == "marcela@colegio.cl"][0]
+        c5.post(f"/encargado/usuarios/{marcela['id']}/activar", follow_redirects=True)
+        check("usuarios: cuenta reactivada queda activa de nuevo", models.obtener_usuario(marcela["id"])["activo"] is True)
+
+
+# ================================================================ TEST 8: cola de tareas (tasks.encolar) sin REDIS_URL configurado
+def test_cola_tareas_respaldo_hilos():
+    import tasks
+    import time
+    resultado = {}
+    evento = __import__("threading").Event()
+
+    def _trabajo(a, b, palabra=""):
+        resultado["suma"] = a + b
+        resultado["palabra"] = palabra
+        evento.set()
+
+    check("tasks: sin REDIS_URL, encolar() no intenta usar una cola real", tasks._obtener_cola() is None)
+    tasks.encolar(_trabajo, 2, 3, palabra="hola")
+    evento.wait(timeout=2)
+    check("tasks: el trabajo se ejecutó igual (respaldo por hilo)", resultado.get("suma") == 5 and resultado.get("palabra") == "hola")
+
+
 if __name__ == "__main__":
     try:
         test_migracion()
@@ -786,6 +894,8 @@ if __name__ == "__main__":
         test_purga(rotulo)
         test_tareas_seguridad()
         test_informe_sin_correo_encargado()
+        test_autenticacion_multiusuario()
+        test_cola_tareas_respaldo_hilos()
     except Exception:
         print("\n=== EXCEPCION NO MANEJADA ===")
         traceback.print_exc()

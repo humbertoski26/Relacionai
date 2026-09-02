@@ -5,3 +5,11 @@ python-docx==1.2.0
 pypdf==3.17.4
 reportlab>=4.0
 gunicorn>=22.0
+
+# --- opcionales, solo se usan si se configura la variable de entorno correspondiente ---
+# Postgres (DATABASE_URL): sin esta variable la app sigue usando SQLite igual que antes.
+psycopg2-binary>=2.9
+# Cola de tareas real (REDIS_URL): sin esta variable la app sigue usando hilos en
+# segundo plano igual que antes.
+rq>=1.16
+redis>=5.0

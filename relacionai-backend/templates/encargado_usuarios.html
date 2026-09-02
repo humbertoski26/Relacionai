@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Usuarios — RelacionAI{% endblock %}
+{% block topnav %}
+<div class="topnav">
+  <a href="{{ url_for('encargado_configuracion') }}">← Configuración</a>
+  <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+</div>
+{% endblock %}
+{% block content %}
+
+<h1 style="font-size:22px; margin-bottom:6px;">Usuarios</h1>
+<p style="font-size:13px; color:var(--ink-muted); margin-bottom:18px;">
+  Cada persona del equipo de convivencia entra con su propia cuenta — así el historial de
+  cada caso queda a nombre de quién hizo cada acción, y puedes desactivar el acceso de
+  alguien que deja el cargo sin tener que avisarle una contraseña nueva a los demás.
+</p>
+
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <h3 style="font-size:13px;">Agregar una cuenta nueva</h3>
+  <form method="post" action="{{ url_for('encargado_crear_usuario') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;">
+    <div class="field" style="margin-bottom:0; flex:1; min-width:180px;">
+      <label for="nombre">Nombre</label>
+      <input type="text" id="nombre" name="nombre" placeholder="Ej: Marcela Soto" required>
+    </div>
+    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
+      <label for="email">Correo</label>
+      <input type="email" id="email" name="email" placeholder="marcela@colegio.cl" required>
+    </div>
+    <div class="field" style="margin-bottom:0; flex:1; min-width:160px;">
+      <label for="password">Contraseña inicial</label>
+      <input type="password" id="password" name="password" minlength="6" required>
+    </div>
+    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-muted); padding-bottom:10px;">
+      <input type="checkbox" name="es_admin"> Administrador
+    </label>
+    <button type="submit" class="btn btn-primary">Crear cuenta</button>
+  </form>
+  <div class="hint" style="margin-top:8px;">Un administrador puede crear y desactivar otras cuentas; cualquier cuenta puede cambiar su propia contraseña desde Configuración.</div>
+</div>
+
+<div class="card">
+  <table class="list">
+    <thead>
+      <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Creada</th><th>Último ingreso</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for u in usuarios %}
+      <tr>
+        <td>{{ u['nombre'] }}</td>
+        <td>{{ u['email'] }}</td>
+        <td>{{ 'Administrador' if u['es_admin'] else 'Encargado' }}</td>
+        <td><span class="pill pill-{{ 'bajo' if u['activo'] else 'alto' }}">{{ 'Activa' if u['activo'] else 'Desactivada' }}</span></td>
+        <td>{{ u['creado_en']|fecha }}</td>
+        <td>{{ u['ultimo_ingreso_en']|fecha if u['ultimo_ingreso_en'] else '—' }}</td>
+        <td>
+          {% if u['activo'] %}
+          <form method="post" action="{{ url_for('encargado_desactivar_usuario', usuario_id=u['id']) }}">
+            <button type="submit" class="btn btn-ghost" style="padding:5px 10px; font-size:11.5px;">Desactivar</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('encargado_activar_usuario', usuario_id=u['id']) }}">
+            <button type="submit" class="btn btn-ghost" style="padding:5px 10px; font-size:11.5px;">Reactivar</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

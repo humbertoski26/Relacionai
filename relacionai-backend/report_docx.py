@@ -90,6 +90,9 @@ def construir_informe_docx(caso, relatos, problemas, soluciones, pasos_reglament
             pass  # imagen corrupta o formato no soportado por python-docx: se omite sin romper el informe
 
     _titulo(doc, "Informe de análisis — RelacionAI")
+    nombre_colegio = configuracion["nombre_colegio"] if configuracion else None
+    if nombre_colegio:
+        _meta(doc, nombre_colegio, color=ACCENT)
     nivel = (caso["nivel_urgencia"] or "medio")
     _meta(doc, f"Caso {caso['rotulo']} · Apellido: {caso['apellido']}")
     linea_meta = doc.add_paragraph()
@@ -157,7 +160,7 @@ def construir_informe_docx(caso, relatos, problemas, soluciones, pasos_reglament
     return buf.getvalue()
 
 
-def construir_relato_docx(caso, relato, numero=None) -> bytes:
+def construir_relato_docx(caso, relato, numero=None, configuracion=None) -> bytes:
     """Un solo relato como documento Word descargable por sí solo — para que el encargado
     pueda guardar en su computador el respaldo de una persona en particular, sin tener que
     descargar el informe completo del caso. caso y relato: sqlite3.Row."""
@@ -167,6 +170,9 @@ def construir_relato_docx(caso, relato, numero=None) -> bytes:
     if numero:
         titulo += f" (Relato {numero})"
     _titulo(doc, titulo)
+    nombre_colegio = configuracion["nombre_colegio"] if configuracion else None
+    if nombre_colegio:
+        _meta(doc, nombre_colegio, color=ACCENT)
     _meta(doc, f"Caso {caso['rotulo']} · Apellido: {caso['apellido']}")
     _meta(doc, f"Recibido: {_fmt_fecha(relato['subido_en'])} · Formato: {relato['formato_entrada']}"
                + (f" · Archivo original: {relato['archivo_original']}" if relato["archivo_original"] else ""))

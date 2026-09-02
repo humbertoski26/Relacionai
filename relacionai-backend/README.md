@@ -143,12 +143,50 @@ python3 test_funcional.py
 | Variable | Para qué sirve |
 |---|---|
 | `SECRET_KEY` | Firma la sesión del encargado. Genera una propia y no la compartas. |
-| `ENCARGADO_PASSWORD` | Contraseña de acceso al panel (un solo usuario, por ahora). |
+| `ENCARGADO_PASSWORD` | Solo se usa **una vez**, al arrancar por primera vez sin ningún usuario todavía creado: se crea automáticamente una cuenta con esta contraseña (correo: el que esté en "Datos del encargado", o `encargado@relacionai.local` si aún no se ha configurado ninguno). De ahí en adelante, los accesos son por cuenta individual — ver "Usuarios" más abajo. |
+| `DATABASE_URL` | Opcional. Si se define (por ejemplo al agregar una base de datos Postgres en Render), la app usa Postgres en vez de SQLite — ver "Pasar a Postgres" más abajo. Sin esta variable, sigue usando el archivo SQLite de siempre. |
+| `REDIS_URL` | Opcional. Si se define (por ejemplo al agregar un Key Value/Redis en Render), el análisis con Claude y el envío de correos se procesan en una cola de tareas real (RQ, con un proceso worker aparte — ver `worker.py`) en vez de en un hilo del proceso web. Sin esta variable, sigue usando hilos igual que antes. |
 | `ANTHROPIC_API_KEY` | **Necesaria** para que Claude genere los resúmenes y la síntesis. Se obtiene en [console.anthropic.com](https://console.anthropic.com) — es distinta de tu cuenta de claude.ai. Sin ella, la plataforma funciona igual (recibe relatos, arma el historial, genera el informe) pero la síntesis queda marcada como "pendiente de configuración". |
 | `CLAUDE_MODEL` | Modelo de Claude a usar (por defecto `claude-sonnet-4-5`). Revisa el listado vigente en la [documentación de modelos](https://docs.claude.com/en/docs/about-claude/models). |
 | `PORT` | Puerto del servidor. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` | Opcionales, pero **muy recomendadas para un uso real**: si se configuran, la plataforma envía automáticamente: copia del relato a quien lo sube, invitación a cada destinatario agregado, recordatorios, y el informe final al correo del encargado al cerrar cada caso (su único respaldo antes de la purga a los 15 días — ver arriba). Sin ellas, todo lo demás sigue funcionando igual — solo no se manda ningún correo (se puede seguir compartiendo el link manualmente, pero el respaldo del informe no llega a ninguna parte). Sirve con Gmail (contraseña de aplicación) o cualquier proveedor SMTP transaccional (Resend, SendGrid, Mailgun, etc.). |
 | `TASKS_SECRET` | Recomendada. Clave para proteger la ruta `POST /tasks/recordatorios` (recordatorios automáticos diarios **y purga de casos cerrados hace 15+ días**) — ver la sección de abajo. |
+
+### Usuarios (cuentas del equipo de convivencia)
+
+Cada persona entra con su propia cuenta (correo + contraseña) en vez de una
+contraseña compartida. La primera vez que se arranca la app sin ningún
+usuario creado todavía, se crea sola una cuenta administradora con la
+contraseña de `ENCARGADO_PASSWORD` — de ahí en adelante, esa cuenta (desde
+`/encargado/usuarios`) puede crear cuentas nuevas para el resto del equipo y
+desactivar el acceso de alguien que deja el cargo, sin tener que avisarle una
+contraseña nueva a los demás. Cualquier cuenta puede cambiar su propia
+contraseña desde `/encargado/configuracion`. El historial de cada caso queda
+a nombre de la cuenta que hizo la acción.
+
+### Pasar a Postgres
+
+Sin hacer nada, la app sigue usando SQLite (el archivo `data/relacionai.db`).
+Para pasar a Postgres:
+
+1. Agrega una base de datos Postgres (en Render: "New" → "PostgreSQL" — el
+   plan gratiuto sirve para partir, pero no tiene backups; para producción
+   real conviene un plan pagado con backups automáticos).
+2. Copia su "Internal Database URL" (o "External", si el servidor web no
+   corre en el mismo proveedor) y agrégala como variable de entorno
+   `DATABASE_URL` en el servicio web.
+3. Reinicia el servicio. Al arrancar, `models.init_db()` crea sola toda la
+   estructura de tablas en la base Postgres nueva (no hay que correr ninguna
+   migración a mano) — pero **no** copia lo que ya hubiera en el SQLite
+   viejo: si el colegio ya tenía casos cargados, hay que migrar esos datos
+   aparte antes del cambio (o hacerlo antes de que el colegio empiece a
+   usarlo).
+
+Con `REDIS_URL` es parecido: agrega un Key Value (Redis) en Render, copia su
+URL de conexión como `REDIS_URL` en el servicio web, y despliega un segundo
+servicio (tipo "Background Worker", mismo repo, comando `python worker.py`)
+para que procese la cola. Sin ese segundo servicio, encolar seguiría
+funcionando pero nada tomaría los trabajos de la cola.
 
 ### Recordatorios automáticos y purga
 
@@ -170,7 +208,8 @@ llame a esa ruta — por ejemplo un **Cron Job de Render** apuntando a
 `https://tu-dominio/tasks/recordatorios` con ese header. Una sola tarea
 programada cubre ambas cosas (recordatorios y purga); no hace falta configurar
 una segunda. No se puede correr como un proceso Python aparte porque necesita
-la misma base de datos SQLite que usa el servidor web.
+la misma base de datos que usa el servidor web (SQLite o Postgres, según
+`DATABASE_URL` — ver "Pasar a Postgres" arriba).
 
 ## Desplegarlo para que el link funcione de verdad
 
@@ -194,18 +233,20 @@ configurar nada aparte.
 - **Disco persistente (crítico).** El plan gratuito de Render usa disco
   **efímero**: cada vez que el servicio se reinicia o se vuelve a desplegar,
   todo lo que esté en `data/relacionai.db` (es decir, **todos los casos,
-  relatos e historial de todos los colegios**) puede perderse por completo.
-  Esto es aceptable para probar, pero **no para vender el producto**: antes
-  de tener clientes reales hay que pasar a un plan de Render con **disco
-  persistente montado en `data/`** (Render lo ofrece como "Persistent Disk"
-  en los planes pagados), o migrar `models.py` a Postgres (es la única pieza
-  que tocaría). Sin esto, un simple redeploy podría borrar la información de
-  un colegio sin aviso.
+  relatos e historial**) puede perderse por completo. Esto es aceptable para
+  probar, pero **no para vender el producto**: antes de tener clientes reales,
+  define `DATABASE_URL` para pasar a Postgres (ver "Pasar a Postgres" más
+  arriba) — con Postgres los datos ya no dependen del disco del servicio web.
+  Alternativa más simple si por ahora prefieres seguir con SQLite: un plan de
+  Render con "Persistent Disk" montado en `data/`. Sin uno de los dos, un
+  simple redeploy podría borrar la información del colegio sin aviso.
 - Cambia `SECRET_KEY` y `ENCARGADO_PASSWORD` por valores propios — los que
-  vienen en `.env.example` son solo para desarrollo. Si vendes esto a varios
-  colegios, cada uno necesita su **propio despliegue** (su propia base de
-  datos y su propia contraseña) — este prototipo es de un solo colegio con
-  un solo encargado compartiendo la misma contraseña, no multi-tenant.
+  vienen en `.env.example` son solo para desarrollo (`ENCARGADO_PASSWORD` solo
+  se usa una vez, para crear la primera cuenta — ver "Usuarios" arriba). Si
+  vendes esto a varios colegios, cada uno necesita su **propio despliegue**
+  (su propia base de datos y sus propias cuentas) — sigue siendo un colegio
+  por despliegue, no multi-tenant; ver `DEPLOY_NUEVO_COLEGIO.md` para el
+  procedimiento paso a paso de levantar un colegio nuevo.
 - Configura SMTP (ver tabla de variables arriba) — sin esto, el respaldo
   automático del informe antes de la purga de 15 días no se envía a ninguna
   parte, y el punto 8 de "Cómo funciona" se vuelve una pérdida de datos real.
@@ -235,17 +276,20 @@ configurar nada aparte.
 
 ```
 app.py            # rutas Flask (encargado + público)
-models.py         # esquema SQLite y acceso a datos (casos, relatos, historial, purga)
+models.py         # esquema y acceso a datos — SQLite por defecto, Postgres si hay DATABASE_URL
+tasks.py          # ejecuta trabajos en segundo plano: hilos por defecto, RQ si hay REDIS_URL
+worker.py         # proceso worker de la cola RQ (solo se usa si hay REDIS_URL)
 extract.py        # extracción de texto desde .txt / .docx / .pdf
 claude_client.py  # llamadas a la API de Anthropic (resumen + síntesis)
 report_docx.py    # informe final en Word (python-docx) — el que se usa
 report_pdf.py     # versión anterior en PDF (reportlab) — ya no se usa, se deja de referencia
 email_client.py   # envío de correos (copia de relato, invitación, recordatorio, informe final)
 test_funcional.py # pruebas automatizadas de extremo a extremo (ver más arriba)
+DEPLOY_NUEVO_COLEGIO.md  # procedimiento paso a paso para levantar un colegio nuevo
 templates/        # HTML (Jinja2)
 static/style.css  # estilos (identidad visual RelacionAI / GADUAI)
 static/img/gaduai-logo.png  # logo oficial de GADUAI (pie de página de la app)
-data/             # base de datos SQLite (se crea sola al primer arranque)
+data/             # base de datos SQLite (se crea sola al primer arranque; no se usa si hay DATABASE_URL)
 ```
 
 ## Configuración (panel del encargado)
@@ -287,7 +331,7 @@ llenarlos:
 
 ## Próximos pasos sugeridos
 
-Hechos en esta ronda:
+Hechos en la ronda anterior:
 
 - **Notificación al encargado por correo cuando llega un relato nuevo** (además
   de la copia que recibe quien lo sube) — ya no depende de revisar el panel
@@ -297,27 +341,56 @@ Hechos en esta ronda:
   ajustar cuántos días se guarda el detalle de un caso cerrado antes de
   purgarse.
 
-Pendientes — decisiones de infraestructura o de alcance, no solo de código,
-así que se dejan para que el dueño del producto las resuelva antes de vender
-a varios colegios reales:
+Hechos en esta ronda — los cuatro puntos que habían quedado "pendientes —
+decisiones de infraestructura" en la ronda anterior. Se implementaron a nivel
+de código, todos activados por variables de entorno opcionales para no romper
+nada de lo que ya está funcionando: **sin configurar nada nuevo, todo sigue
+exactamente igual que antes** (SQLite, hilos en segundo plano, una sola
+contraseña). Cada uno se activa solo si el dueño del producto decide dar el
+paso de infraestructura que implica:
 
-- Disco persistente / Postgres antes de tener clientes reales (ver checklist)
-  — requiere subir de plan en Render (o migrar a otro proveedor), es una
-  decisión de costo, no algo que se resuelva solo con un cambio de código.
-- Si se vende a varios colegios: separar cada uno en su propio despliegue
-  (base de datos y contraseña propias) — esta versión ya está pensada para
-  un colegio por despliegue (por eso "Nombre del colegio" es un solo campo de
-  configuración); vender a varios colegios significa repetir el despliegue,
-  no cambiar el código.
-- Autenticación real por encargado (si hay más de una persona revisando
-  casos) en vez de una sola contraseña compartida — hoy el historial usa el
-  nombre configurado en "Datos del encargado" como aproximación de "quién
-  hizo la acción", que funciona bien con un solo encargado pero no distingue
-  entre varias personas que comparten el mismo login. Implementarlo bien
-  significa cuentas individuales con su propio login — un cambio de alcance
-  considerable, mejor confirmarlo antes de emprenderlo.
-- El procesamiento con Claude (relatos nuevos, subir el reglamento interno, y
-  generar la síntesis manualmente) ya corre en un hilo en segundo plano — no
-  bloquea la respuesta ni arriesga un error del servidor por demora; si el
-  volumen de casos crece mucho, migrar a una cola de tareas real (Celery/RQ)
-  para mayor robustez.
+- **Postgres** (`models.py`): ahora soporta SQLite (por defecto) o Postgres,
+  según la variable de entorno `DATABASE_URL`. Con Postgres, los datos ya no
+  dependen de que el disco del servicio web sea persistente, y quedan con los
+  backups automáticos que da el proveedor. Ver "Pasar a Postgres" más abajo.
+  **Importante:** este sandbox no tiene acceso de red para instalar
+  `psycopg2` ni levantar un Postgres real, así que esta ruta se probó con un
+  doble hecho a mano (mismo `models.py`, sin reimplementar su lógica) que
+  imita la interfaz de `psycopg2` — cubre la traducción de sentencias, las
+  migraciones y los casos de uso reales (crear caso, agregar relato,
+  usuarios, purga, insignia en bytes), pero no reemplaza probarlo contra un
+  Postgres de verdad. Antes de confiar en esto en producción, hazlo una vez
+  con un Postgres real de prueba (ver checklist más abajo) — con gusto lo
+  reviso apenas tengas esa base disponible.
+- **Autenticación real por encargado** (`models.py` / `app.py`): cuentas
+  individuales (nombre, correo, contraseña) en vez de una sola contraseña
+  compartida. Un administrador crea y desactiva cuentas desde
+  `/encargado/usuarios`; cualquier cuenta puede cambiar su propia contraseña
+  desde Configuración. El historial de cada caso ahora queda a nombre de
+  quién hizo la acción de verdad. La migración es automática: al arrancar por
+  primera vez con este cambio, se crea una cuenta con el correo y la
+  contraseña que ya se estaban usando (`ENCARGADO_PASSWORD`), para que el
+  equipo pueda seguir entrando igual y crear las demás cuentas ya adentro.
+- **Cola de tareas real** (`tasks.py`, `worker.py`): si se define
+  `REDIS_URL`, el análisis con Claude, el envío de correos y la lectura del
+  reglamento se encolan en una cola real (RQ) que corre en un proceso worker
+  aparte, en vez de en un hilo del proceso web — con eso, un reinicio del
+  servidor web a mitad de un trabajo ya no lo pierde silenciosamente. Sin
+  `REDIS_URL`, sigue funcionando exactamente igual que antes (hilos). El
+  worker se despliega como un segundo servicio en Render (`python worker.py`)
+  — ver `worker.py` y el runbook de despliegue.
+- **Separar colegios en despliegues distintos**: la arquitectura ya era
+  "un despliegue = un colegio" desde antes; lo que realmente faltaba era (a)
+  que el nombre del colegio apareciera en los documentos y avisos, no solo en
+  el panel — ahora aparece en el informe, en el Word de cada relato y en el
+  asunto de los correos al encargado (`[Nombre del colegio] ...`), útil para
+  quien supervisa más de un colegio con el mismo correo — y (b) un
+  procedimiento repetible para levantar un colegio nuevo sin improvisarlo
+  cada vez. Ver `DEPLOY_NUEVO_COLEGIO.md`.
+
+Con estos cuatro puntos resueltos a nivel de código, lo que queda antes de
+vender a colegios reales es sobre todo **activarlos** (agregar Postgres y
+Redis en Render para el/los colegios que lo necesiten) y lo demás que ya
+estaba anotado en el checklist de la sección "Antes de venderlo/usarlo con
+colegios reales" más arriba (HTTPS, límite de intentos de login, CSRF
+explícito, respaldos periódicos).

@@ -3,6 +3,9 @@
 {% block topnav %}
 <div class="topnav">
   <a href="{{ url_for('encargado_dashboard') }}">← Todos los casos</a>
+  {% if usuario_actual_admin %}
+  <a href="{{ url_for('encargado_usuarios') }}">Usuarios</a>
+  {% endif %}
   <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>
 {% endblock %}
@@ -128,6 +131,25 @@
     <input type="number" name="dias_retencion" min="1" max="365" value="{{ config['dias_retencion'] or 15 }}" style="max-width:100px; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:var(--font-body); font-size:14px;">
     <span style="font-size:12.5px; color:var(--ink-muted);">días</span>
     <button type="submit" class="btn btn-ghost">Guardar</button>
+  </form>
+</div>
+
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <h3 style="font-size:13px;">Mi cuenta</h3>
+  <p style="font-size:12.5px; color:var(--ink-muted); margin-bottom:12px;">
+    Sesión iniciada como <strong>{{ usuario_actual_nombre }}</strong>{{ ' (administrador)' if usuario_actual_admin else '' }}.
+    {% if usuario_actual_admin %}Para crear o desactivar cuentas de otras personas del equipo, ve a <a href="{{ url_for('encargado_usuarios') }}">Usuarios</a>.{% endif %}
+  </p>
+  <form method="post" action="{{ url_for('encargado_cambiar_password') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+    <div class="field" style="margin-bottom:0; flex:1; min-width:180px;">
+      <label for="password_actual">Contraseña actual</label>
+      <input type="password" id="password_actual" name="password_actual" required>
+    </div>
+    <div class="field" style="margin-bottom:0; flex:1; min-width:180px;">
+      <label for="password_nueva">Contraseña nueva</label>
+      <input type="password" id="password_nueva" name="password_nueva" minlength="6" required>
+    </div>
+    <button type="submit" class="btn btn-ghost">Cambiar contraseña</button>
   </form>
 </div>
 

@@ -87,9 +87,14 @@ def enviar_invitacion(email: str, rotulo: str, link: str, fecha_limite: str = ""
     return _enviar(email, asunto, cuerpo)
 
 
-def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str, dias_retencion: int = 15) -> bool:
+def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str, dias_retencion: int = 15, nombre_colegio: str = "") -> bool:
     """Envía el informe final (Word) al correo del encargado apenas se emite — sirve de
-    respaldo, porque el caso se purga automáticamente pasados `dias_retencion` días."""
+    respaldo, porque el caso se purga automáticamente pasados `dias_retencion` días.
+
+    nombre_colegio (opcional) se antepone al asunto — cada colegio corre en su propio
+    despliegue con su propia base de datos, pero una misma persona puede supervisar más
+    de un colegio con la misma casilla de correo, y esto ayuda a distinguir de un vistazo
+    a cuál colegio corresponde cada aviso."""
     if not _configurado():
         logger.info("SMTP no configurado; no se envía el informe del caso %s a %s", rotulo, email)
         return False
@@ -101,8 +106,9 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
     remitente = os.environ.get("SMTP_FROM") or usuario
     usar_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
 
+    prefijo = f"[{nombre_colegio}] " if nombre_colegio else ""
     msg = EmailMessage()
-    msg["Subject"] = f"Informe del caso {rotulo} — respaldo"
+    msg["Subject"] = f"{prefijo}Informe del caso {rotulo} — respaldo"
     msg["From"] = remitente
     msg["To"] = email
     msg.set_content(
@@ -131,10 +137,11 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
         return False
 
 
-def enviar_notificacion_relato_nuevo(email: str, rotulo: str, apellido: str, nombre_persona: str, link_caso: str) -> bool:
+def enviar_notificacion_relato_nuevo(email: str, rotulo: str, apellido: str, nombre_persona: str, link_caso: str, nombre_colegio: str = "") -> bool:
     """Avisa al encargado apenas llega un relato nuevo a uno de sus casos, para que no
     tenga que revisar el panel manualmente para enterarse."""
-    asunto = f"Nuevo relato recibido — caso {rotulo}"
+    prefijo = f"[{nombre_colegio}] " if nombre_colegio else ""
+    asunto = f"{prefijo}Nuevo relato recibido — caso {rotulo}"
     cuerpo = (
         "Hola,\n\n"
         f"{nombre_persona} acaba de registrar un relato en el caso {rotulo} (apellido {apellido}).\n\n"
