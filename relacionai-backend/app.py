@@ -84,12 +84,9 @@ def link_correo(rotulo: str, apellido: str) -> str:
     return "mailto:?subject=" + urllib.parse.quote(asunto) + "&body=" + urllib.parse.quote(cuerpo)
 
 
-def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
-    """Genera el resumen individual y recalcula la síntesis general del caso."""
-    resumen = resumir_relato(contenido)
-    models.guardar_resumen_relato(relato_id, resumen)
-    models.registrar_historial(rotulo, actor="Claude", accion="Generó el resumen individual del relato recién subido.")
-
+def _recalcular_sintesis(rotulo: str) -> dict:
+    """Recalcula la síntesis general del caso a partir de los relatos actuales
+    (usa la config del reglamento y los casos pasados vigentes al momento de llamarla)."""
     relatos = models.listar_relatos(rotulo)
     entrada = [
         {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
@@ -104,6 +101,16 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
         rotulo, resultado["sintesis"],
         resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
     )
+    return resultado
+
+
+def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
+    """Genera el resumen individual y recalcula la síntesis general del caso."""
+    resumen = resumir_relato(contenido)
+    models.guardar_resumen_relato(relato_id, resumen)
+    models.registrar_historial(rotulo, actor="Claude", accion="Generó el resumen individual del relato recién subido.")
+
+    resultado = _recalcular_sintesis(rotulo)
     models.registrar_historial(
         rotulo, actor="Claude",
         accion=f"Actualizó la síntesis general del caso (nivel de urgencia: {resultado['nivel_urgencia']}).",
@@ -122,6 +129,33 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
             enviar_copia_relato(correo, nombre, rotulo, contenido)
         except Exception:
             app.logger.exception("Error enviando la copia del relato a %s", correo)
+
+
+def _sintetizar_en_segundo_plano(rotulo: str):
+    """Se ejecuta en un hilo aparte al pedir manualmente 'Generar síntesis', para no
+    dejar esperando al encargado (ni arriesgar un timeout del servidor) mientras Claude
+    procesa — la misma razón por la que el envío de relatos ya corre en segundo plano."""
+    try:
+        resultado = _recalcular_sintesis(rotulo)
+        models.registrar_historial(
+            rotulo, actor="Encargado de convivencia",
+            accion=f"Actualizó manualmente la síntesis general del caso (nivel de urgencia: {resultado['nivel_urgencia']}).",
+        )
+    except Exception:
+        app.logger.exception("Error generando en segundo plano la síntesis manual del caso %s", rotulo)
+
+
+def _procesar_reglamento_en_segundo_plano(texto: str):
+    """Genera en un hilo aparte el resumen interno que confirma que Claude estudió el
+    reglamento recién subido — se hace en segundo plano para que subir el archivo no
+    deje esperando a el encargado mientras Claude lo procesa (una llamada a Claude puede
+    tardar bastante y, si se hace de inmediato, corre el riesgo de que el servidor la
+    corte a mitad de camino y se vea como un error)."""
+    try:
+        resumen = resumir_reglamento(texto)
+        models.guardar_resumen_reglamento(resumen)
+    except Exception:
+        app.logger.exception("Error generando en segundo plano el resumen del reglamento interno.")
 
 
 # ------------------------------------------------------------------ rutas
@@ -190,9 +224,17 @@ def encargado_subir_reglamento():
     except ExtractError as exc:
         flash(str(exc), "error")
         return redirect(url_for("encargado_configuracion"))
-    resumen = resumir_reglamento(texto)
-    models.guardar_reglamento(archivo.filename, texto, resumen=resumen)
-    flash("Reglamento interno guardado — revisa abajo el resumen de lo que Claude entendió, para confirmar que lo leyó bien.", "ok")
+
+    # Se guarda el archivo de inmediato (sin resumen todavía) y el estudio con Claude
+    # se hace en segundo plano, para no dejar esperando al encargado — ver
+    # _procesar_reglamento_en_segundo_plano.
+    models.guardar_reglamento(archivo.filename, texto)
+    threading.Thread(
+        target=_procesar_reglamento_en_segundo_plano,
+        args=(texto,),
+        daemon=True,
+    ).start()
+    flash("Reglamento interno subido y en estudio — recarga esta página en unos segundos para ver la confirmación de que Claude ya lo estudió.", "ok")
     return redirect(url_for("encargado_configuracion"))
 
 
@@ -299,20 +341,13 @@ def encargado_sintetizar(rotulo):
     if not relatos:
         flash("Este caso todavía no tiene relatos para sintetizar.", "error")
         return redirect(url_for("encargado_caso", rotulo=rotulo))
-    entrada = [
-        {"nombre": r["nombre_persona"], "formato": r["formato_entrada"], "contenido": r["contenido"], "resumen": r["resumen"]}
-        for r in relatos
-    ]
-    config = models.obtener_configuracion()
-    reglamento_texto = config["reglamento_texto"] if config else ""
-    casos_pasados = models.casos_pasados_resumen(excluir_rotulo=rotulo)
-    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto, casos_pasados=casos_pasados)
-    models.guardar_sintesis_general(
-        rotulo, resultado["sintesis"],
-        resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
-    )
+
+    # Se hace en segundo plano (mismo motivo que el envío de relatos): la llamada a
+    # Claude puede tardar bastante y no conviene dejar esperando al encargado ni
+    # arriesgar que el servidor la corte a mitad de camino.
+    threading.Thread(target=_sintetizar_en_segundo_plano, args=(rotulo,), daemon=True).start()
     models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Solicitó actualizar manualmente la síntesis general del caso.")
-    flash("Síntesis general actualizada.", "ok")
+    flash("Actualizando la síntesis general — recarga esta página en unos segundos para ver el resultado.", "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
 

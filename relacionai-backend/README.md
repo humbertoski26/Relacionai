@@ -147,21 +147,24 @@ data/             # base de datos SQLite (se crea sola al primer arranque)
 En `/encargado/configuracion` el encargado puede:
 
 - Guardar su **nombre y cargo**, que aparecen al final de todo informe PDF descargado.
-- Subir el **reglamento interno** de la institución (Word, PDF o texto). Apenas se sube,
-  Claude lo lee y muestra ahí mismo un resumen de lo que entendió (para confirmar que lo leyó
-  bien). De ahí en adelante, cada síntesis de caso incluye una sección propia "Pasos del
-  Reglamento Interno" con lo que aplica al caso — si no hay nada aplicable, lo dice
-  explícitamente en vez de inventar un procedimiento. Se aplica a todas las síntesis (nuevas
-  y al volver a generar una existente) mientras el reglamento esté cargado; se puede
-  reemplazar o quitar en cualquier momento.
+- Subir el **reglamento interno** de la institución (Word, PDF o texto). Al subirlo, la
+  página confirma de inmediato que se guardó y Claude lo estudia en segundo plano (no hace
+  esperar a el encargado); recargando la página después de unos segundos se ve un indicador
+  de "Reglamento estudiado ✓" (sin mostrar un resumen del contenido). De ahí en adelante, cada
+  síntesis de caso incluye una sección propia "Pasos del Reglamento Interno" con lo que aplica
+  al caso — si no hay nada aplicable, lo dice explícitamente en vez de inventar un
+  procedimiento. Se aplica a todas las síntesis (nuevas y al volver a generar una existente)
+  mientras el reglamento esté cargado; se puede reemplazar o quitar en cualquier momento.
 
 ## Próximos pasos sugeridos
 
 - Integrarlo como módulo de GADUAI cuando corresponda.
 - Autenticación real por encargado (si hay más de una persona revisando
   casos) en vez de una sola contraseña compartida.
-- El procesamiento con Claude ya corre en un hilo en segundo plano (no bloquea
-  la confirmación a la persona); si el volumen de relatos crece mucho, migrar
-  a una cola de tareas real (Celery/RQ) para mayor robustez.
+- El procesamiento con Claude (relatos nuevos, subir el reglamento interno, y
+  generar la síntesis manualmente) ya corre en un hilo en segundo plano — no
+  bloquea la respuesta ni arriesga un error del servidor por demora; si el
+  volumen de casos crece mucho, migrar a una cola de tareas real (Celery/RQ)
+  para mayor robustez.
 - Notificar al encargado (correo/WhatsApp) cuando llega un relato nuevo, en
   vez de que tenga que revisar el panel manualmente.
