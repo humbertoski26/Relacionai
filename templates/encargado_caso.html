@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+{% block title %}{{ caso['rotulo'] }} — Relacionai{% endblock %}
+{% block topnav %}
+<div class="topnav">
+  <a href="{{ url_for('encargado_dashboard') }}">← Todos los casos</a>
+  <a href="{{ url_for('encargado_configuracion') }}">Configuración</a>
+  <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+</div>
+{% endblock %}
+{% block content %}
+
+<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:6px;">
+  <div>
+    <div class="label-mono">{{ caso['rotulo'] }}</div>
+    <h1 style="font-size:24px; margin-top:4px;">Caso {{ caso['apellido'] }}</h1>
+    <p style="color:var(--ink-muted); font-size:13px; margin-top:4px;">
+      Creado {{ caso['creado_en']|fecha }}
+      {% if caso['nivel_urgencia'] %} · <span class="pill pill-{{ caso['nivel_urgencia'] }}">Urgencia {{ caso['nivel_urgencia'] }}</span>{% endif %}
+      {% if caso['titulo'] %} · {{ caso['titulo'] }}{% endif %}
+      {% if caso['fecha_limite'] %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
+    </p>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    {% if caso['sintesis_general'] %}
+    <a class="btn btn-primary" href="{{ url_for('encargado_informe', rotulo=caso['rotulo']) }}">Descargar informe (PDF)</a>
+    {% endif %}
+    <form method="post" action="{{ url_for('encargado_sintetizar', rotulo=caso['rotulo']) }}">
+      <button type="submit" class="btn btn-ghost">{{ 'Actualizar síntesis' if caso['sintesis_general'] else 'Generar síntesis' }}</button>
+    </form>
+  </div>
+</div>
+
+<div class="section card" style="padding:20px;">
+  <h3>Compartir este caso</h3>
+  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Envía este link a las personas involucradas para que suban su propio relato a esta misma carpeta.</p>
+  <code class="linkbox" id="link-caso">{{ link_publico }}</code>
+  <div class="share-row" style="margin-top:12px;">
+    <button type="button" class="btn btn-ghost" id="btn-copiar-link" data-link="{{ link_publico }}">Copiar link</button>
+    <a class="btn btn-wa" href="https://wa.me/?text={{ (link_publico ~ ' — registra tu relato en el caso ' ~ caso['rotulo'])|urlencode }}" target="_blank" rel="noopener">Compartir por WhatsApp</a>
+    <a class="btn btn-mail" href="{{ link_correo }}">Enviar por correo</a>
+  </div>
+
+  <form method="post" action="{{ url_for('encargado_set_plazo', rotulo=caso['rotulo']) }}" style="margin-top:16px; padding-top:16px; border-top:1px solid var(--border);">
+    <label for="fecha_limite" style="font-size:13px; font-weight:600;">Fecha máxima de entrega</label>
+    <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:center;">
+      <input type="date" id="fecha_limite" name="fecha_limite" value="{{ caso['fecha_limite'] or '' }}" style="max-width:180px;">
+      <button type="submit" class="btn btn-ghost">Guardar plazo</button>
+    </div>
+    <p style="font-size:12px; color:var(--ink-faint); margin-top:6px;">Se muestra a las personas cuando entran a subir su relato, y se incluye en las invitaciones y recordatorios por correo.</p>
+  </form>
+</div>
+
+<div class="section card" style="padding:20px;">
+  <h3>Destinatarios</h3>
+  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:10px;">Agrega los correos de las personas que deben registrar su relato — se les envía el link automáticamente (si el correo está configurado) y quedan en la lista de seguimiento para recordatorios.</p>
+  <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}">
+    <textarea name="emails" rows="2" placeholder="uno o varios correos, separados por coma o por línea" style="width:100%; resize:vertical;"></textarea>
+    <button type="submit" class="btn btn-primary" style="margin-top:8px;">Agregar y enviar link</button>
+  </form>
+
+  {% if destinatarios %}
+  <div style="margin-top:16px; display:grid; gap:8px;">
+    {% for d in destinatarios %}
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:10px 0; border-top:1px solid var(--border);">
+      <div>
+        <strong style="font-size:13.5px;">{{ d['email'] }}</strong>
+        <div style="font-size:12px; color:var(--ink-faint); margin-top:2px;">
+          {% if d['cumplido_en'] %}Completó su relato el {{ d['cumplido_en']|fecha }}{% else %}Invitado {{ d['invitado_en']|fecha }}{% if d['ultimo_recordatorio_en'] %} · último recordatorio {{ d['ultimo_recordatorio_en']|fecha }}{% endif %}{% endif %}
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span class="pill {{ 'pill-bajo' if d['cumplido_en'] else 'pill-medio' }}">{{ 'Completado' if d['cumplido_en'] else 'Pendiente' }}</span>
+        {% if not d['cumplido_en'] %}
+        <form method="post" action="{{ url_for('encargado_recordar_destinatario', rotulo=caso['rotulo'], destinatario_id=d['id']) }}">
+          <button type="submit" class="btn btn-ghost" style="padding:5px 10px; font-size:12px;">Recordar ahora</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="font-size:13px; color:var(--ink-faint); margin-top:12px;">Aún no agregas destinatarios.</p>
+  {% endif %}
+</div>
+
+<script>
+  var btnCopiar = document.getElementById('btn-copiar-link');
+  if (btnCopiar) {
+    var original = btnCopiar.textContent;
+    var mostrarExito = function () {
+      btnCopiar.textContent = '¡Copiado! ✓';
+      btnCopiar.classList.add('btn-copiado');
+      setTimeout(function () {
+        btnCopiar.textContent = original;
+        btnCopiar.classList.remove('btn-copiado');
+      }, 2000);
+    };
+    var copiarConTextarea = function (link) {
+      try {
+        var temp = document.createElement('textarea');
+        temp.value = link;
+        temp.setAttribute('readonly', '');
+        temp.style.position = 'fixed';
+        temp.style.left = '-9999px';
+        document.body.appendChild(temp);
+        temp.focus();
+        temp.select();
+        temp.setSelectionRange(0, temp.value.length);
+        var ok = document.execCommand('copy');
+        document.body.removeChild(temp);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    };
+    btnCopiar.addEventListener('click', function () {
+      var link = btnCopiar.getAttribute('data-link');
+      if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(link).then(mostrarExito).catch(function () {
+          if (copiarConTextarea(link)) { mostrarExito(); } else { window.prompt('Copia el link manualmente:', link); }
+        });
+      } else if (copiarConTextarea(link)) {
+        mostrarExito();
+      } else {
+        window.prompt('Copia el link manualmente:', link);
+      }
+    });
+  }
+</script>
+
+{% if caso['sintesis_general'] %}
+<div class="section">
+  <h2>Síntesis general del caso</h2>
+  <div class="card" style="padding:18px 20px;">
+    <p style="line-height:1.65;">{{ caso['sintesis_general'] }}</p>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Problemas identificados</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for p in problemas %}<li>{{ p }}</li>{% endfor %}
+  </ul>
+</div>
+
+{% if pasos_reglamento %}
+<div class="section">
+  <h3>Pasos del Reglamento Interno</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for p in pasos_reglamento %}<li>{{ p }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="section">
+  <h3>Sugerencias de acción</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for s in soluciones %}<li>{{ s }}</li>{% endfor %}
+  </ul>
+</div>
+{% else %}
+<div class="section card" style="padding:20px; color:var(--ink-muted); font-size:13.5px;">
+  Todavía no hay síntesis general — se genera automáticamente apenas llegue el primer relato (puede
+  tardar uno o dos minutos; recarga la página), o puedes generarla manualmente con el botón de arriba.
+</div>
+{% endif %}
+
+<div class="section">
+  <h2>Relatos recibidos ({{ relatos|length }})</h2>
+  {% for r in relatos %}
+  <div class="card" style="padding:18px 20px; margin-bottom:12px;">
+    <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+      <strong>{{ r['nombre_persona'] }}</strong>
+      <span style="font-size:12px; color:var(--ink-faint);">{{ r['subido_en']|fecha }} · {{ r['formato_entrada'] }}{% if r['archivo_original'] %} · {{ r['archivo_original'] }}{% endif %}</span>
+    </div>
+    {% if r['resumen'] %}
+    <p style="margin-top:10px; font-size:13.5px; color:var(--ink-muted);"><em>{{ r['resumen'] }}</em></p>
+    {% endif %}
+    <details style="margin-top:10px;">
+      <summary style="cursor:pointer; font-size:12.5px; color:var(--accent-strong);">Ver relato completo</summary>
+      <div class="relato-box" style="margin-top:8px;">{{ r['contenido'] }}</div>
+    </details>
+  </div>
+  {% else %}
+  <div class="card" style="padding:24px; text-align:center; color:var(--ink-faint); font-size:13.5px;">Aún no llegan relatos a este caso.</div>
+  {% endfor %}
+</div>
+
+<div class="section">
+  <h2>Historial del caso</h2>
+  <div class="card" style="padding:18px 20px;">
+    <ul class="timeline">
+      {% for h in historial %}
+      <li><time>{{ h['ocurrido_en']|fecha }}</time><span><strong>{{ h['actor'] }}</strong> — {{ h['accion'] }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+{% endblock %}
