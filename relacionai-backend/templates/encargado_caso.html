@@ -137,26 +137,27 @@
   </div>
 </div>
 
-<div class="section" style="display:grid; grid-template-columns:1fr 1fr; gap:18px;">
-  <div>
-    <h3>Problemas identificados</h3>
-    <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
-      {% for p in problemas %}<li>{{ p }}</li>{% endfor %}
-    </ul>
-  </div>
-  <div>
-    <h3>Soluciones posibles</h3>
-    <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
-      {% for s in soluciones %}<li>{{ s }}</li>{% endfor %}
-    </ul>
-  </div>
+<div class="section">
+  <h3>Problemas identificados</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for p in problemas %}<li>{{ p }}</li>{% endfor %}
+  </ul>
 </div>
 
+{% if pasos_reglamento %}
 <div class="section">
-  <h3>Interpretación</h3>
-  <div class="card" style="padding:18px 20px;">
-    <p style="line-height:1.65; font-size:13.5px;">{{ caso['interpretacion'] }}</p>
-  </div>
+  <h3>Pasos del Reglamento Interno</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for p in pasos_reglamento %}<li>{{ p }}</li>{% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<div class="section">
+  <h3>Sugerencias de acción</h3>
+  <ul style="margin:0; padding-left:20px; display:grid; gap:6px; font-size:13.5px;">
+    {% for s in soluciones %}<li>{{ s }}</li>{% endfor %}
+  </ul>
 </div>
 {% else %}
 <div class="section card" style="padding:20px; color:var(--ink-muted); font-size:13.5px;">

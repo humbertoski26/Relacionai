@@ -34,8 +34,13 @@
   <input type="hidden" name="metodo" id="metodo" value="texto">
 
   <div class="field" id="campo-texto">
-    <label for="relato">Tu relato</label>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:4px;">
+      <label for="relato" style="margin-bottom:0;">Tu relato</label>
+      <button type="button" class="btn btn-ghost" id="btn-mic" style="display:none; padding:6px 12px; font-size:12px;">🎤 Dictar</button>
+    </div>
     <textarea id="relato" name="relato" placeholder="Escribe aquí tu relato transcrito, o pega el texto de tu correo…"></textarea>
+    <div class="hint" id="mic-hint" style="display:none;">Habla con calma; el texto va apareciendo abajo y puedes revisarlo o corregirlo antes de enviar.</div>
+    <div class="hint" id="mic-error" style="display:none; color:var(--danger);"></div>
   </div>
 
   <div class="field" id="campo-archivo" style="display:none;">
@@ -63,5 +68,103 @@
   }
   mTexto.addEventListener('click', function(){ setMetodo('texto'); });
   mArchivo.addEventListener('click', function(){ setMetodo('archivo'); });
+</script>
+
+<script>
+  (function () {
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var btnMic = document.getElementById('btn-mic');
+    var micHint = document.getElementById('mic-hint');
+    var micError = document.getElementById('mic-error');
+    var textarea = document.getElementById('relato');
+    if (!SpeechRecognition || !btnMic || !textarea) {
+      return; // navegador sin soporte: no se muestra el botón, se sigue escribiendo/pegando normal
+    }
+
+    btnMic.style.display = 'inline-flex';
+    micHint.style.display = '';
+
+    var recognizer = new SpeechRecognition();
+    recognizer.lang = 'es-CL';
+    recognizer.continuous = true;
+    recognizer.interimResults = true;
+
+    var grabando = false;
+    var detenidoManualmente = false;
+    var textoBase = '';
+    var textoFinal = '';
+
+    function actualizarBoton() {
+      btnMic.textContent = grabando ? '⏹ Detener' : '🎤 Dictar';
+      btnMic.classList.toggle('btn-grabando', grabando);
+    }
+
+    function mostrarError(msg) {
+      micError.textContent = msg;
+      micError.style.display = '';
+    }
+
+    recognizer.onresult = function (event) {
+      var interino = '';
+      var nuevoFinal = '';
+      for (var i = event.resultIndex; i < event.results.length; i++) {
+        var texto = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          nuevoFinal += texto;
+        } else {
+          interino += texto;
+        }
+      }
+      if (nuevoFinal) {
+        textoFinal = (textoFinal + ' ' + nuevoFinal).trim();
+      }
+      var base = textoBase ? textoBase + ' ' : '';
+      textarea.value = (base + textoFinal + (interino ? ' ' + interino : '')).trim();
+    };
+
+    recognizer.onerror = function (event) {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        mostrarError('No se pudo activar el micrófono — revisa los permisos del navegador.');
+      } else if (event.error === 'no-speech') {
+        // silencio: no es un error real, se sigue escuchando
+        return;
+      } else {
+        mostrarError('Hubo un problema con el dictado; puedes seguir escribiendo a mano.');
+      }
+      detenidoManualmente = true;
+      grabando = false;
+      actualizarBoton();
+    };
+
+    recognizer.onend = function () {
+      if (grabando && !detenidoManualmente) {
+        // algunos navegadores cortan solos tras un silencio largo; se reintenta
+        try { recognizer.start(); } catch (e) { grabando = false; actualizarBoton(); }
+      }
+    };
+
+    btnMic.addEventListener('click', function () {
+      micError.style.display = 'none';
+      if (grabando) {
+        detenidoManualmente = true;
+        grabando = false;
+        actualizarBoton();
+        try { recognizer.stop(); } catch (e) {}
+        return;
+      }
+      textoBase = textarea.value;
+      textoFinal = '';
+      detenidoManualmente = false;
+      grabando = true;
+      actualizarBoton();
+      try {
+        recognizer.start();
+      } catch (e) {
+        grabando = false;
+        actualizarBoton();
+        mostrarError('No se pudo iniciar el dictado; puedes seguir escribiendo a mano.');
+      }
+    });
+  })();
 </script>
 {% endblock %}

@@ -1,7 +1,8 @@
 """
 Genera el informe final descargable de un caso: síntesis general,
-problemas identificados, interpretación y soluciones posibles, más el
-listado de relatos que se incluyeron en el análisis.
+problemas identificados, pasos según el reglamento interno (si se subió
+uno) y sugerencias de acción, más el listado de relatos que se incluyeron
+en el análisis.
 
 Usa reportlab (platypus) para no depender de binarios externos.
 """
@@ -59,7 +60,7 @@ def _bullets(items, style):
     )
 
 
-def construir_informe_pdf(caso, relatos, problemas, soluciones, configuracion=None) -> bytes:
+def construir_informe_pdf(caso, relatos, problemas, soluciones, pasos_reglamento=None, configuracion=None) -> bytes:
     """caso: sqlite3.Row de la tabla casos. relatos: lista de sqlite3.Row de la tabla relatos."""
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -88,10 +89,11 @@ def construir_informe_pdf(caso, relatos, problemas, soluciones, configuracion=No
     story.append(Paragraph("PROBLEMAS IDENTIFICADOS", s["h2"]))
     story.append(_bullets(problemas, s["li"]))
 
-    story.append(Paragraph("INTERPRETACIÓN", s["h2"]))
-    story.append(Paragraph(caso["interpretacion"] or "—", s["body"]))
+    if pasos_reglamento:
+        story.append(Paragraph("PASOS DEL REGLAMENTO INTERNO", s["h2"]))
+        story.append(_bullets(pasos_reglamento, s["li"]))
 
-    story.append(Paragraph("SOLUCIONES POSIBLES", s["h2"]))
+    story.append(Paragraph("SUGERENCIAS DE ACCIÓN", s["h2"]))
     story.append(_bullets(soluciones, s["li"]))
 
     story.append(Paragraph("RELATOS INCLUIDOS EN ESTE CASO", s["h2"]))

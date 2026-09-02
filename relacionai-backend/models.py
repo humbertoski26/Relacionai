@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS casos (
     interpretacion TEXT,
     problemas_json TEXT,
     soluciones_json TEXT,
+    pasos_reglamento_json TEXT,
     nivel_urgencia TEXT,
     sintesis_generada_en TEXT,
     fecha_limite TEXT
@@ -82,7 +83,8 @@ CREATE TABLE IF NOT EXISTS configuracion (
     cargo_encargado TEXT,
     reglamento_nombre_archivo TEXT,
     reglamento_texto TEXT,
-    reglamento_subido_en TEXT
+    reglamento_subido_en TEXT,
+    reglamento_resumen TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
@@ -96,6 +98,8 @@ CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
 _MIGRATIONS = [
     ("casos", "fecha_limite", "TEXT"),
     ("relatos", "correo_persona", "TEXT"),
+    ("casos", "pasos_reglamento_json", "TEXT"),
+    ("configuracion", "reglamento_resumen", "TEXT"),
 ]
 
 
@@ -225,13 +229,13 @@ def listar_relatos(rotulo: str):
         ).fetchall()
 
 
-def guardar_sintesis_general(rotulo: str, sintesis: str, interpretacion: str, problemas: list, soluciones: list, nivel_urgencia: str):
+def guardar_sintesis_general(rotulo: str, sintesis: str, problemas: list, pasos_reglamento: list, soluciones: list, nivel_urgencia: str):
     with get_conn() as conn:
         conn.execute(
-            """UPDATE casos SET sintesis_general = ?, interpretacion = ?, problemas_json = ?,
+            """UPDATE casos SET sintesis_general = ?, problemas_json = ?, pasos_reglamento_json = ?,
                                  soluciones_json = ?, nivel_urgencia = ?, sintesis_generada_en = ?
                WHERE rotulo = ?""",
-            (sintesis, interpretacion, json.dumps(problemas, ensure_ascii=False),
+            (sintesis, json.dumps(problemas, ensure_ascii=False), json.dumps(pasos_reglamento, ensure_ascii=False),
              json.dumps(soluciones, ensure_ascii=False), nivel_urgencia, now_iso(), rotulo),
         )
 
@@ -267,6 +271,13 @@ def problemas_de(caso) -> list:
 def soluciones_de(caso) -> list:
     try:
         return json.loads(caso["soluciones_json"]) if caso["soluciones_json"] else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def pasos_reglamento_de(caso) -> list:
+    try:
+        return json.loads(caso["pasos_reglamento_json"]) if caso["pasos_reglamento_json"] else []
     except (json.JSONDecodeError, TypeError):
         return []
 
@@ -394,20 +405,27 @@ def guardar_datos_encargado(nombre: str, cargo: str):
         )
 
 
-def guardar_reglamento(nombre_archivo: str, texto: str):
+def guardar_reglamento(nombre_archivo: str, texto: str, resumen: str = ""):
     with get_conn() as conn:
         conn.execute(
             """UPDATE configuracion
-               SET reglamento_nombre_archivo = ?, reglamento_texto = ?, reglamento_subido_en = ?
+               SET reglamento_nombre_archivo = ?, reglamento_texto = ?, reglamento_subido_en = ?,
+                   reglamento_resumen = ?
                WHERE id = 1""",
-            (nombre_archivo, texto, now_iso()),
+            (nombre_archivo, texto, now_iso(), resumen or None),
         )
+
+
+def guardar_resumen_reglamento(resumen: str):
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET reglamento_resumen = ? WHERE id = 1", (resumen,))
 
 
 def quitar_reglamento():
     with get_conn() as conn:
         conn.execute(
             """UPDATE configuracion
-               SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL
+               SET reglamento_nombre_archivo = NULL, reglamento_texto = NULL, reglamento_subido_en = NULL,
+                   reglamento_resumen = NULL
                WHERE id = 1""",
         )

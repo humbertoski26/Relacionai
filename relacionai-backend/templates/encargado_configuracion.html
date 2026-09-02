@@ -29,20 +29,30 @@
 <div class="card" style="padding:22px;">
   <h3>Reglamento interno</h3>
   <p style="font-size:13px; color:var(--ink-muted); margin-bottom:14px;">
-    Si lo subes, antes de sugerir soluciones Claude primero va a revisar qué indica tu reglamento
-    interno para casos como el que se está analizando, y luego va a agregar sus propias
-    sugerencias adicionales. Se aplica a la síntesis de todos los casos.
+    Si lo subes, en cada síntesis Claude va a revisar qué indica tu reglamento interno para el caso
+    que se está analizando, en una sección aparte ("Pasos del Reglamento Interno"), además de las
+    sugerencias de acción propias. Se aplica a la síntesis de todos los casos.
   </p>
 
   {% if config['reglamento_nombre_archivo'] %}
-  <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 14px; background:var(--surface-sunken); border-radius:8px; margin-bottom:14px;">
-    <div>
-      <strong style="font-size:13.5px;">{{ config['reglamento_nombre_archivo'] }}</strong>
-      <div style="font-size:12px; color:var(--ink-faint); margin-top:2px;">Subido {{ config['reglamento_subido_en']|fecha }}</div>
+  <div style="padding:12px 14px; background:var(--surface-sunken); border-radius:8px; margin-bottom:14px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+      <div>
+        <strong style="font-size:13.5px;">{{ config['reglamento_nombre_archivo'] }}</strong>
+        <div style="font-size:12px; color:var(--ink-faint); margin-top:2px;">Subido {{ config['reglamento_subido_en']|fecha }}</div>
+      </div>
+      <form method="post" action="{{ url_for('encargado_quitar_reglamento') }}">
+        <button type="submit" class="btn btn-ghost" style="padding:6px 12px; font-size:12px;">Quitar</button>
+      </form>
     </div>
-    <form method="post" action="{{ url_for('encargado_quitar_reglamento') }}">
-      <button type="submit" class="btn btn-ghost" style="padding:6px 12px; font-size:12px;">Quitar</button>
-    </form>
+    {% if config['reglamento_resumen'] %}
+    <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--border);">
+      <div style="font-size:11.5px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-faint); font-family:var(--font-mono); margin-bottom:6px;">
+        Esto entendió Claude de tu reglamento
+      </div>
+      <p style="font-size:13px; line-height:1.6; color:var(--ink);">{{ config['reglamento_resumen'] }}</p>
+    </div>
+    {% endif %}
   </div>
   {% else %}
   <p style="font-size:13px; color:var(--ink-faint); margin-bottom:14px;">Todavía no has subido un reglamento interno.</p>

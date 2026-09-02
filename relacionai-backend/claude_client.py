@@ -1,13 +1,17 @@
 """
 Integración con la API de Claude (Anthropic) para Relacionai.
 
-Dos operaciones:
+Operaciones:
   - resumir_relato(texto): resumen breve de UN relato individual, apenas
     llega a la carpeta del caso.
-  - sintetizar_caso(apellido, relatos): al acumularse relatos en la
-    carpeta, combina los resúmenes (o el texto completo si son pocos) y
-    devuelve una síntesis general del caso, los problemas identificados,
-    una interpretación y posibles soluciones.
+  - sintetizar_caso(apellido, relatos, reglamento_texto): al acumularse
+    relatos en la carpeta, combina los resúmenes (o el texto completo si son
+    pocos) y devuelve una síntesis general del caso, los problemas
+    identificados, los pasos según el reglamento interno (si se subió uno) y
+    sugerencias de acción propias.
+  - resumir_reglamento(texto): resumen de confirmación que se muestra al
+    encargado apenas sube un reglamento interno, para que vea que Claude
+    efectivamente lo leyó.
 
 Requiere la variable de entorno ANTHROPIC_API_KEY. Si no está configurada,
 las funciones NO fallan: devuelven un resultado marcado como "pendiente de
@@ -115,16 +119,15 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
     """
     relatos: lista de dicts {nombre, formato, contenido, resumen}
     reglamento_texto: texto del reglamento interno de la institución (opcional). Si se
-      entrega, las soluciones deben basarse primero en lo que dice el reglamento y luego
-      agregar sugerencias propias.
-    Devuelve: {sintesis, interpretacion, problemas: [...], soluciones: [...], nivel_urgencia}
+      entrega, se pide además una lista separada de pasos según ese reglamento.
+    Devuelve: {sintesis, problemas: [...], pasos_reglamento: [...], sugerencias: [...], nivel_urgencia}
     """
     if not _api_key_configurada():
         return {
             "sintesis": "Síntesis pendiente: configura ANTHROPIC_API_KEY en el servidor.",
-            "interpretacion": "",
             "problemas": [],
-            "soluciones": [],
+            "pasos_reglamento": [],
+            "sugerencias": [],
             "nivel_urgencia": "medio",
         }
 
@@ -139,18 +142,17 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
         bloque_reglamento = (
             "\n\nREGLAMENTO INTERNO DE LA INSTITUCIÓN (referencia obligatoria):\n\"\"\"\n"
             + reglamento_texto[:20000] + "\n\"\"\"\n\n"
-            "Antes de proponer soluciones propias, revisa este reglamento y considera qué "
-            "establece sobre situaciones como la de este caso (procedimientos, plazos, "
-            "sanciones, protocolos de derivación, etc.). En la lista de \"soluciones\" del "
-            "JSON, ordénalas así: primero uno o más ítems que empiecen literalmente con "
-            "\"Según el reglamento interno: \" resumiendo lo que el reglamento indica para "
-            "este caso (si el reglamento no dice nada aplicable, incluye igual un ítem que "
-            "empiece con \"Según el reglamento interno: \" señalando que no encontraste algo "
-            "específico); luego, a continuación, agrega tus propias recomendaciones "
-            "adicionales (sin ese prefijo) según tu análisis del caso."
+            "Revisa este reglamento y arma la lista \"pasosReglamento\" con los pasos o "
+            "procedimientos concretos que indica para una situación como la de este caso "
+            "(citando artículos o secciones si el reglamento los tiene). Si no encuentras nada "
+            "aplicable en el reglamento para este caso, la lista \"pasosReglamento\" debe tener "
+            "un único ítem que diga textualmente: \"Este caso no aparece contemplado específicamente "
+            "en el reglamento interno.\" — no inventes procedimientos que el reglamento no contiene."
         )
+        pide_pasos_reglamento = '  "pasosReglamento": ["paso o procedimiento 1 según el reglamento", "..."],\n'
     else:
         bloque_reglamento = ""
+        pide_pasos_reglamento = ""
 
     prompt = (
         "Eres una persona analista experta en relaciones interpersonales y convivencia, apoyando a "
@@ -164,16 +166,15 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
         '  "sintesis": "síntesis general del caso integrando todos los relatos, en 4 a 8 frases, '
         'en tercera persona, sin tomar partido por una sola versión cuando hay versiones distintas",\n'
         '  "problemas": ["problema concreto 1", "problema concreto 2", "..."],\n'
-        '  "interpretacion": "análisis de las dinámicas relacionales en juego: patrones, roles, puntos de '
-        'acuerdo y desacuerdo entre los relatos, posibles causas de fondo, en 4 a 8 frases",\n'
-        '  "soluciones": ["recomendación accionable 1", "recomendación accionable 2", "..."],\n'
+        + pide_pasos_reglamento
+        + '  "sugerencias": ["sugerencia de acción 1", "sugerencia de acción 2", "..."],\n'
         '  "nivelUrgencia": "bajo | medio | alto"\n'
         "}\n\n"
-        "Entrega entre 2 y 6 problemas y entre 3 y 6 soluciones, concretas y realistas para quien coordina "
-        "el caso. Si algún relato incluye señales de violencia, abuso, autolesión o riesgo grave para "
-        "alguien, marca nivelUrgencia como \"alto\", indícalo explícitamente en la interpretación y "
-        "recomienda derivar a un profesional o autoridad competente en vez de dar soluciones simplistas "
-        "para esa parte."
+        "Entrega entre 2 y 6 problemas y entre 3 y 6 sugerencias de acción, concretas y realistas para "
+        "quien coordina el caso (independientes de los pasos del reglamento, si los hay). Si algún "
+        "relato incluye señales de violencia, abuso, autolesión o riesgo grave para alguien, marca "
+        "nivelUrgencia como \"alto\" y recomienda explícitamente, como una de las sugerencias de acción, "
+        "derivar a un profesional o autoridad competente en vez de dar sugerencias simplistas para esa parte."
     )
     try:
         texto = _llamar_claude(prompt, max_tokens=1800)
@@ -181,9 +182,9 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
     except ClaudeError as exc:
         return {
             "sintesis": f"No se pudo generar la síntesis automática: {exc}",
-            "interpretacion": "",
             "problemas": [],
-            "soluciones": [],
+            "pasos_reglamento": [],
+            "sugerencias": [],
             "nivel_urgencia": "medio",
         }
 
@@ -192,8 +193,31 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
         nivel = "medio"
     return {
         "sintesis": str(data.get("sintesis", "")),
-        "interpretacion": str(data.get("interpretacion", "")),
         "problemas": [str(p) for p in data.get("problemas", [])][:8],
-        "soluciones": [str(s) for s in data.get("soluciones", [])][:8],
+        "pasos_reglamento": [str(p) for p in data.get("pasosReglamento", [])][:8],
+        "sugerencias": [str(s) for s in data.get("sugerencias", [])][:8],
         "nivel_urgencia": nivel,
     }
+
+
+def resumir_reglamento(texto: str) -> str:
+    """Resumen breve para confirmarle al encargado que Claude efectivamente leyó y
+    entendió el reglamento recién subido (se muestra apenas termina de subirlo)."""
+    if not _api_key_configurada():
+        return (
+            "[Resumen pendiente: configura ANTHROPIC_API_KEY en el servidor para que Claude "
+            "confirme qué entendió del reglamento subido.]"
+        )
+    prompt = (
+        "Lee el siguiente reglamento interno de una institución (puede venir de un Word o PDF, "
+        "con errores de formato). Resume en 3 a 6 frases, en español, qué tipo de situaciones "
+        "cubre y qué procedimientos generales establece (plazos, instancias, sanciones, "
+        "derivaciones), para confirmarle a quien lo subió que fue leído correctamente. Si el "
+        "texto no parece ser un reglamento o protocolo institucional, dilo explícitamente en vez "
+        "de inventar contenido.\n\n"
+        f"REGLAMENTO:\n\"\"\"\n{texto[:20000]}\n\"\"\"\n"
+    )
+    try:
+        return _llamar_claude(prompt, max_tokens=500).strip()
+    except ClaudeError as exc:
+        return f"[No se pudo generar el resumen de confirmación: {exc}]"

@@ -25,7 +25,7 @@ from flask import (
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import models
-from claude_client import resumir_relato, sintetizar_caso
+from claude_client import resumir_relato, resumir_reglamento, sintetizar_caso
 from email_client import enviar_copia_relato, enviar_invitacion, enviar_recordatorio
 from extract import ExtractError, extraer_texto
 from report_pdf import construir_informe_pdf
@@ -100,8 +100,8 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
     reglamento_texto = config["reglamento_texto"] if config else ""
     resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
     models.guardar_sintesis_general(
-        rotulo, resultado["sintesis"], resultado["interpretacion"],
-        resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
+        rotulo, resultado["sintesis"],
+        resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
     )
     models.registrar_historial(
         rotulo, actor="Claude",
@@ -189,8 +189,9 @@ def encargado_subir_reglamento():
     except ExtractError as exc:
         flash(str(exc), "error")
         return redirect(url_for("encargado_configuracion"))
-    models.guardar_reglamento(archivo.filename, texto)
-    flash("Reglamento interno guardado. Se usará en las próximas síntesis.", "ok")
+    resumen = resumir_reglamento(texto)
+    models.guardar_reglamento(archivo.filename, texto, resumen=resumen)
+    flash("Reglamento interno guardado — revisa abajo el resumen de lo que Claude entendió, para confirmar que lo leyó bien.", "ok")
     return redirect(url_for("encargado_configuracion"))
 
 
@@ -227,6 +228,7 @@ def encargado_caso(rotulo):
         "encargado_caso.html",
         caso=caso, relatos=relatos, historial=historial, destinatarios=destinatarios,
         problemas=models.problemas_de(caso), soluciones=models.soluciones_de(caso),
+        pasos_reglamento=models.pasos_reglamento_de(caso),
         link_publico=link_publico(rotulo),
         link_whatsapp=link_whatsapp(rotulo, caso["apellido"]),
         link_correo=link_correo(rotulo, caso["apellido"]),
@@ -304,8 +306,8 @@ def encargado_sintetizar(rotulo):
     reglamento_texto = config["reglamento_texto"] if config else ""
     resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
     models.guardar_sintesis_general(
-        rotulo, resultado["sintesis"], resultado["interpretacion"],
-        resultado["problemas"], resultado["soluciones"], resultado["nivel_urgencia"],
+        rotulo, resultado["sintesis"],
+        resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
     )
     models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Solicitó actualizar manualmente la síntesis general del caso.")
     flash("Síntesis general actualizada.", "ok")
@@ -320,7 +322,10 @@ def encargado_informe(rotulo):
         abort(404)
     relatos = models.listar_relatos(rotulo)
     config = models.obtener_configuracion()
-    pdf_bytes = construir_informe_pdf(caso, relatos, models.problemas_de(caso), models.soluciones_de(caso), configuracion=config)
+    pdf_bytes = construir_informe_pdf(
+        caso, relatos, models.problemas_de(caso), models.soluciones_de(caso),
+        pasos_reglamento=models.pasos_reglamento_de(caso), configuracion=config,
+    )
     models.registrar_historial(rotulo, actor="Encargado de convivencia", accion="Descargó el informe final del caso.")
     from io import BytesIO
     return send_file(

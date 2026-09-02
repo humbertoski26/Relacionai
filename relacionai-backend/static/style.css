@@ -72,6 +72,7 @@ textarea{ min-height:180px; resize:vertical; line-height:1.6; }
 .btn-wa{ background:#25D366; color:#06301c; }
 .btn-mail{ background:var(--surface-sunken); color:var(--ink); border:1px solid var(--border); }
 .btn-copiado{ background:var(--good-soft); color:var(--good); border-color:var(--good); }
+.btn-grabando{ background:var(--danger-soft); color:var(--danger); border-color:var(--danger); }
 
 .pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; }
 .pill-abierto,.pill-bajo{ background:var(--good-soft); color:var(--good); }

@@ -27,22 +27,23 @@ en un informe descargable para el encargado de convivencia.
    completan su relato (ver "Recordatorios automáticos" más abajo).
 4. Cada persona entra al link, escribe su nombre, opcionalmente su correo (para
    recibir una copia de su propio relato), y sube su relato — como texto
-   pegado, o como archivo `.docx`, `.pdf` o `.txt`. No ve los relatos de las
-   demás personas.
+   pegado, dictado por voz (botón de micrófono, revisable y editable antes de
+   enviar — funciona en navegadores compatibles, como Chrome), o como archivo
+   `.docx`, `.pdf` o `.txt`. No ve los relatos de las demás personas.
 5. Apenas llega un relato, la plataforma confirma de inmediato (no hace
    esperar a la persona) y en segundo plano Claude genera un **resumen
    individual**, y luego recalcula automáticamente la **síntesis general del
-   caso** (combinando todos los relatos recibidos hasta ese momento),
-   identificando problemas, una interpretación y posibles soluciones. Si el
-   encargado subió un **reglamento interno** (ver Configuración), las
-   soluciones primero indican qué dice el reglamento para ese tipo de caso, y
-   luego agregan sugerencias propias. Todo queda registrado con hora y quién
-   lo hizo en el **historial** del caso — puede tardar uno o dos minutos en
-   aparecer; conviene recargar la página del caso.
+   caso** (combinando todos los relatos recibidos hasta ese momento):
+   problemas identificados, pasos según el reglamento interno si el encargado
+   subió uno (ver Configuración — si el reglamento no cubre algo puntual, lo
+   dice explícitamente en vez de inventar), y sugerencias de acción propias.
+   Todo queda registrado con hora y quién lo hizo en el **historial** del
+   caso — puede tardar uno o dos minutos en aparecer; conviene recargar la
+   página del caso.
 6. El encargado descarga en cualquier momento el **informe final en PDF** con
-   la síntesis, los problemas, la interpretación, las soluciones, el listado
-   de relatos incluidos, y su nombre y cargo al final (configurables en
-   "Configuración").
+   la síntesis, los problemas identificados, los pasos del reglamento interno
+   (si aplica), las sugerencias de acción, el listado de relatos incluidos, y
+   su nombre y cargo al final (configurables en "Configuración").
 
 ## Stack
 
@@ -142,11 +143,13 @@ data/             # base de datos SQLite (se crea sola al primer arranque)
 En `/encargado/configuracion` el encargado puede:
 
 - Guardar su **nombre y cargo**, que aparecen al final de todo informe PDF descargado.
-- Subir el **reglamento interno** de la institución (Word, PDF o texto). A partir de ahí,
-  antes de sugerir soluciones Claude primero revisa qué indica el reglamento para casos
-  similares y lo señala explícitamente, y después agrega sugerencias propias según el caso.
-  Se aplica a todas las síntesis (nuevas y al volver a generar una existente) mientras el
-  reglamento esté cargado; se puede reemplazar o quitar en cualquier momento.
+- Subir el **reglamento interno** de la institución (Word, PDF o texto). Apenas se sube,
+  Claude lo lee y muestra ahí mismo un resumen de lo que entendió (para confirmar que lo leyó
+  bien). De ahí en adelante, cada síntesis de caso incluye una sección propia "Pasos del
+  Reglamento Interno" con lo que aplica al caso — si no hay nada aplicable, lo dice
+  explícitamente en vez de inventar un procedimiento. Se aplica a todas las síntesis (nuevas
+  y al volver a generar una existente) mientras el reglamento esté cargado; se puede
+  reemplazar o quitar en cualquier momento.
 
 ## Próximos pasos sugeridos
 
