@@ -155,3 +155,38 @@ def construir_informe_docx(caso, relatos, problemas, soluciones, pasos_reglament
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
+
+
+def construir_relato_docx(caso, relato, numero=None) -> bytes:
+    """Un solo relato como documento Word descargable por sí solo — para que el encargado
+    pueda guardar en su computador el respaldo de una persona en particular, sin tener que
+    descargar el informe completo del caso. caso y relato: sqlite3.Row."""
+    doc = Document()
+
+    titulo = f"Relato — {relato['nombre_persona']}"
+    if numero:
+        titulo += f" (Relato {numero})"
+    _titulo(doc, titulo)
+    _meta(doc, f"Caso {caso['rotulo']} · Apellido: {caso['apellido']}")
+    _meta(doc, f"Recibido: {_fmt_fecha(relato['subido_en'])} · Formato: {relato['formato_entrada']}"
+               + (f" · Archivo original: {relato['archivo_original']}" if relato["archivo_original"] else ""))
+
+    if relato["resumen"]:
+        _h2(doc, "Resumen")
+        _body(doc, relato["resumen"])
+
+    _h2(doc, "Relato completo")
+    _body(doc, relato["contenido"] or "—")
+
+    doc.add_paragraph()
+    nota = doc.add_paragraph()
+    run = nota.add_run(
+        "Extraído de RelacionAI. Documento de uso interno y confidencial."
+    )
+    run.italic = True
+    run.font.size = Pt(8)
+    run.font.color.rgb = MUTED
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()

@@ -117,6 +117,20 @@
   </div>
 </div>
 
+<div class="card" style="padding:22px; margin-bottom:20px;">
+  <h3 style="font-size:13px;">Período de retención</h3>
+  <p style="font-size:12.5px; color:var(--ink-muted); margin-bottom:12px;">
+    Días que se guarda el detalle de un caso (relatos y síntesis) después de cerrarse
+    (al descargar el informe final), antes de eliminarse automáticamente y dejar solo el
+    historial como respaldo estadístico. Por defecto 15 días.
+  </p>
+  <form method="post" action="{{ url_for('encargado_guardar_retencion') }}" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <input type="number" name="dias_retencion" min="1" max="365" value="{{ config['dias_retencion'] or 15 }}" style="max-width:100px; padding:10px 12px; border-radius:8px; border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:var(--font-body); font-size:14px;">
+    <span style="font-size:12.5px; color:var(--ink-muted);">días</span>
+    <button type="submit" class="btn btn-ghost">Guardar</button>
+  </form>
+</div>
+
 {% if paso1_listo %}
 <div style="text-align:center; margin-top:8px;">
   <a class="btn btn-primary{{ ' btn-destacado' if paso2_listo else '' }}" href="{{ url_for('encargado_dashboard') }}">Ir a los casos →</a>

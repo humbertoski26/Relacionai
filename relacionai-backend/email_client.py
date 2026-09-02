@@ -87,9 +87,9 @@ def enviar_invitacion(email: str, rotulo: str, link: str, fecha_limite: str = ""
     return _enviar(email, asunto, cuerpo)
 
 
-def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str) -> bool:
+def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes: bytes, nombre_archivo: str, dias_retencion: int = 15) -> bool:
     """Envía el informe final (Word) al correo del encargado apenas se emite — sirve de
-    respaldo, porque el caso se purga automáticamente 15 días después."""
+    respaldo, porque el caso se purga automáticamente pasados `dias_retencion` días."""
     if not _configurado():
         logger.info("SMTP no configurado; no se envía el informe del caso %s a %s", rotulo, email)
         return False
@@ -108,8 +108,8 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
     msg.set_content(
         f"Hola,\n\nAdjunto el informe final del caso {rotulo} (apellido {apellido}), generado al "
         "cerrar el caso.\n\nEste correo es tu respaldo: por política de retención, el contenido "
-        "detallado del caso (los relatos y la síntesis) se elimina automáticamente 15 días después "
-        "de emitido este informe, y solo queda un registro estadístico. Guarda este archivo si "
+        f"detallado del caso (los relatos y la síntesis) se elimina automáticamente {dias_retencion} días "
+        "después de emitido este informe, y solo queda un registro estadístico. Guarda este archivo si "
         "necesitas conservar el detalle.\n\nGracias."
     )
     msg.add_attachment(
@@ -129,6 +129,19 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
     except Exception:  # noqa: BLE001
         logger.exception("No se pudo enviar el informe del caso %s a %s", rotulo, email)
         return False
+
+
+def enviar_notificacion_relato_nuevo(email: str, rotulo: str, apellido: str, nombre_persona: str, link_caso: str) -> bool:
+    """Avisa al encargado apenas llega un relato nuevo a uno de sus casos, para que no
+    tenga que revisar el panel manualmente para enterarse."""
+    asunto = f"Nuevo relato recibido — caso {rotulo}"
+    cuerpo = (
+        "Hola,\n\n"
+        f"{nombre_persona} acaba de registrar un relato en el caso {rotulo} (apellido {apellido}).\n\n"
+        f"Puedes revisarlo aquí:\n{link_caso}\n\n"
+        "Gracias."
+    )
+    return _enviar(email, asunto, cuerpo)
 
 
 def enviar_recordatorio(email: str, rotulo: str, link: str, fecha_limite: str = "") -> bool:

@@ -57,8 +57,8 @@ appmod.enviar_invitacion = lambda email, rotulo, link, fecha_limite="", mensaje=
 appmod.enviar_recordatorio = lambda *a, **k: _fake_enviar(a[0], "recordatorio", "")
 
 _informes_enviados = []
-def _fake_enviar_informe(email, rotulo, apellido, docx_bytes, nombre_archivo):
-    _informes_enviados.append((email, rotulo, nombre_archivo, len(docx_bytes)))
+def _fake_enviar_informe(email, rotulo, apellido, docx_bytes, nombre_archivo, dias_retencion=15):
+    _informes_enviados.append((email, rotulo, nombre_archivo, len(docx_bytes), dias_retencion))
     return True
 appmod.enviar_informe_encargado = _fake_enviar_informe
 
@@ -651,6 +651,88 @@ def test_logo_gaduai():
         check("logo gaduai: el archivo del logo existe en static/img", os.path.exists(os.path.join(os.path.dirname(__file__), "static", "img", "gaduai-logo.png")))
 
 
+# ================================================================ TEST 4n: descarga individual de un relato
+def test_descargar_relato_individual():
+    with app.test_client() as c:
+        login(c)
+        c.post("/encargado/casos", data={"apellido": "DescargaRelato"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "DescargaRelato"][0]["rotulo"]
+        c.post(f"/caso/{rotulo}", data={"nombre": "Ana Torres", "correo": "ana.torres@correo.cl", "relato": "Contenido del primer relato de Ana."}, follow_redirects=True)
+        import time; time.sleep(0.3)
+        relato = models.listar_relatos(rotulo)[0]
+
+        r = c.get(f"/encargado/casos/{rotulo}/relatos/{relato['id']}/descargar")
+        check("descarga relato: responde 200", r.status_code == 200)
+        check("descarga relato: content-type es de Word", "wordprocessingml" in r.content_type)
+        check("descarga relato: nombre de archivo incluye el rotulo", rotulo.encode() in r.headers.get("Content-Disposition", "").encode())
+
+        # otro caso, para probar que no se puede descargar con la URL de un caso al que no pertenece
+        c.post("/encargado/casos", data={"apellido": "DescargaRelatoOtro"}, follow_redirects=True)
+        otro_rotulo = [x for x in models.listar_casos() if x["apellido"] == "DescargaRelatoOtro"][0]["rotulo"]
+        r = c.get(f"/encargado/casos/{otro_rotulo}/relatos/{relato['id']}/descargar")
+        check("descarga relato: 404 si el relato no pertenece a ese caso", r.status_code == 404)
+
+        r = c.get(f"/encargado/casos/{rotulo}/relatos/999999/descargar")
+        check("descarga relato: 404 si el relato no existe", r.status_code == 404)
+
+        r = c.get(f"/encargado/casos/{rotulo}")
+        check("descarga relato: boton de descarga individual visible en la pagina del caso", "Descargar este relato".encode() in r.data)
+
+
+# ================================================================ TEST 4o: aviso al encargado cuando llega un relato nuevo
+def test_notificacion_relato_nuevo():
+    with app.test_client() as c:
+        login(c)
+        n_antes = len(_correos_enviados)
+        c.post("/encargado/casos", data={"apellido": "AvisoRelato"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "AvisoRelato"][0]["rotulo"]
+        c.post(f"/caso/{rotulo}", data={"nombre": "Persona Aviso", "correo": "aviso@correo.cl", "relato": "Contenido para aviso."}, follow_redirects=True)
+        import time; time.sleep(0.3)
+
+        avisos = [x for x in _correos_enviados[n_antes:] if x[0] == "marcela@colegio.cl" and "Nuevo relato recibido" in x[1]]
+        check("aviso encargado: se envia un correo al encargado avisando el relato nuevo", len(avisos) == 1)
+
+        historial = models.listar_historial(rotulo)
+        check("aviso encargado: el resto del flujo del relato sigue funcionando bien", any("Subió un relato" in h["accion"] for h in historial))
+
+
+# ================================================================ TEST 4p: período de retención configurable
+def test_retencion_configurable():
+    with app.test_client() as c:
+        login(c)
+        r = c.post("/encargado/configuracion/retencion", data={"dias_retencion": "0"}, follow_redirects=True)
+        check("retencion: valor invalido (0) es rechazado", "entre 1 y 365".encode() in r.data)
+        r = c.post("/encargado/configuracion/retencion", data={"dias_retencion": "no-es-numero"}, follow_redirects=True)
+        check("retencion: valor no numerico es rechazado", "entre 1 y 365".encode() in r.data)
+
+        r = c.post("/encargado/configuracion/retencion", data={"dias_retencion": "7"}, follow_redirects=True)
+        check("retencion: valor personalizado (7) aceptado", models.dias_retencion() == 7)
+
+        r = c.get("/encargado/configuracion")
+        check("retencion: el valor guardado se muestra en el formulario", b'value="7"' in r.data)
+
+        c.post("/encargado/casos", data={"apellido": "RetencionCorta"}, follow_redirects=True)
+        rotulo = [x for x in models.listar_casos() if x["apellido"] == "RetencionCorta"][0]["rotulo"]
+        c.post(f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "retencion@correo.cl", "relato": "Un relato."}, follow_redirects=True)
+        import time; time.sleep(0.3)
+        c.get(f"/encargado/casos/{rotulo}/informe.docx")
+
+        hace_8_dias = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+        with models.get_conn() as conn:
+            conn.execute("UPDATE casos SET informe_emitido_en = ? WHERE rotulo = ?", (hace_8_dias, rotulo))
+
+        check("retencion: con 7 dias configurados, un caso de 8 dias es candidato a purga", rotulo in models.casos_para_purgar(dias=7))
+        check("retencion: con 15 dias (default), el mismo caso de 8 dias NO seria candidato", rotulo not in models.casos_para_purgar(dias=15))
+
+        c.post("/tasks/recordatorios", headers={"X-Tasks-Secret": "secreto-test"})
+        caso_despues = models.obtener_caso(rotulo)
+        check("retencion: la tarea diaria purga usando el periodo configurado (7 dias)", caso_despues["estado"] == "purgado")
+
+        # se restaura el valor por defecto para no afectar otras pruebas que asumen 15 dias
+        models.guardar_dias_retencion(15)
+        check("retencion: se restaura el valor por defecto (15) al terminar", models.dias_retencion() == 15)
+
+
 # ================================================================ TEST 5: seguridad del endpoint de tareas
 def test_tareas_seguridad():
     with app.test_client() as c:
@@ -698,6 +780,9 @@ if __name__ == "__main__":
         test_limite_relatos_por_persona()
         test_dashboard_muestra_plazo()
         test_logo_gaduai()
+        test_descargar_relato_individual()
+        test_notificacion_relato_nuevo()
+        test_retencion_configurable()
         test_purga(rotulo)
         test_tareas_seguridad()
         test_informe_sin_correo_encargado()

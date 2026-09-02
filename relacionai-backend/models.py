@@ -110,7 +110,10 @@ _MIGRATIONS = [
     ("configuracion", "insignia_mime", "TEXT"),
     ("configuracion", "insignia_nombre_archivo", "TEXT"),
     ("configuracion", "nombre_colegio", "TEXT"),
+    ("configuracion", "dias_retencion", "INTEGER"),
 ]
+
+DIAS_RETENCION_DEFECTO = 15
 
 
 def now_iso():
@@ -271,6 +274,11 @@ def agregar_relato(rotulo: str, nombre_persona: str, formato_entrada: str, archi
 def guardar_resumen_relato(relato_id: int, resumen: str):
     with get_conn() as conn:
         conn.execute("UPDATE relatos SET resumen = ? WHERE id = ?", (resumen, relato_id))
+
+
+def obtener_relato(relato_id: int):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM relatos WHERE id = ?", (relato_id,)).fetchone()
 
 
 def listar_relatos(rotulo: str):
@@ -505,6 +513,19 @@ def guardar_datos_encargado(nombre: str, cargo: str, correo: str = ""):
         )
 
 
+def dias_retencion() -> int:
+    """Días que se mantiene el detalle de un caso cerrado antes de purgarlo — configurable
+    por colegio; 15 si nunca se ha personalizado."""
+    config = obtener_configuracion()
+    valor = config["dias_retencion"] if config else None
+    return int(valor) if valor else DIAS_RETENCION_DEFECTO
+
+
+def guardar_dias_retencion(dias: int):
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET dias_retencion = ? WHERE id = 1", (int(dias),))
+
+
 def guardar_nombre_colegio(nombre_colegio: str):
     """Nombre del colegio — se muestra antes de subir el reglamento interno y la
     insignia, y sirve de referencia para saber a qué colegio pertenece esta memoria
@@ -601,9 +622,12 @@ def marcar_informe_emitido(rotulo: str):
         )
 
 
-def casos_para_purgar(dias: int = 15):
+def casos_para_purgar(dias: int = None):
     """Casos cerrados cuyo informe se emitió hace `dias` días o más, y que todavía no
-    fueron purgados."""
+    fueron purgados. Si no se indica `dias`, usa el período de retención configurado
+    (15 por defecto)."""
+    if dias is None:
+        dias = dias_retencion()
     limite = now_iso()
     with get_conn() as conn:
         filas = conn.execute(
@@ -622,11 +646,14 @@ def casos_para_purgar(dias: int = 15):
     return resultado
 
 
-def purgar_caso(rotulo: str):
-    """Borra el contenido sensible del caso (relatos y síntesis) 15 días después de
-    emitido el informe, dejando solo el rótulo, las fechas, el nivel de urgencia y la
-    cantidad de relatos como estadística — más el historial de acciones, que no contiene
-    el texto de los relatos. El caso queda inaccesible desde ese momento."""
+def purgar_caso(rotulo: str, dias: int = None):
+    """Borra el contenido sensible del caso (relatos y síntesis) una vez cumplido el
+    período de retención configurado (15 días por defecto) desde que se emitió el
+    informe, dejando solo el rótulo, las fechas, el nivel de urgencia y la cantidad de
+    relatos como estadística — más el historial de acciones, que no contiene el texto de
+    los relatos. El caso queda inaccesible desde ese momento."""
+    if dias is None:
+        dias = dias_retencion()
     with get_conn() as conn:
         n_relatos = conn.execute(
             "SELECT COUNT(*) AS n FROM relatos r JOIN casos c ON c.id = r.caso_id WHERE c.rotulo = ?",
@@ -646,5 +673,5 @@ def purgar_caso(rotulo: str):
         )
     registrar_historial(
         rotulo, actor="Sistema",
-        accion=f"Se cumplieron los 15 días desde el informe: se eliminó el contenido de los relatos y la síntesis ({n_relatos} relato(s)); queda solo este historial como respaldo estadístico.",
+        accion=f"Se cumplieron los {dias} días desde el informe: se eliminó el contenido de los relatos y la síntesis ({n_relatos} relato(s)); queda solo este historial como respaldo estadístico.",
     )

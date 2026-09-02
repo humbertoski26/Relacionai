@@ -52,6 +52,10 @@ a{ color:var(--accent-strong); }
 .brand .mark em{ font-style:italic; color:var(--gaduai-cyan); }
 .brand .tag{ font-size:12px; color:var(--ink-muted); font-family:var(--font-mono); max-width:300px; line-height:1.35; }
 .subnav{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); font-family:var(--font-mono); margin:-14px 0 20px; }
+/* Acciones del caso (descargar informe / actualizar síntesis): sticky para que el botón de
+   descargar el informe siga siempre alcanzable al bajar en la página, sin importar cuánto se
+   achique la ventana del navegador — antes solo aparecía arriba del todo y se perdía de vista. */
+.acciones-caso-sticky{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-start; align-items:center; position:sticky; top:10px; z-index:30; background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:8px; box-shadow:var(--shadow); margin-bottom:20px; }
 .topnav{ display:flex; gap:10px; align-items:center; font-size:13.5px; }
 .topnav a{ color:var(--ink-muted); text-decoration:none; font-weight:600; }
 .topnav a:hover{ color:var(--ink); }

@@ -31,10 +31,11 @@ from email_client import (
     enviar_copia_relato,
     enviar_informe_encargado,
     enviar_invitacion,
+    enviar_notificacion_relato_nuevo,
     enviar_recordatorio,
 )
 from extract import ExtractError, extraer_texto
-from report_docx import construir_informe_docx
+from report_docx import construir_informe_docx, construir_relato_docx
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
@@ -93,6 +94,10 @@ def inject_config_global():
 
 def link_publico(rotulo: str) -> str:
     return url_for("caso_publico", rotulo=rotulo, _external=True)
+
+
+def link_caso_privado(rotulo: str) -> str:
+    return url_for("encargado_caso", rotulo=rotulo, _external=True)
 
 
 def _texto_plazo(fecha_limite: str) -> str:
@@ -192,9 +197,10 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
     )
 
 
-def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str):
+def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str, link_caso_privado: str = ""):
     """Se ejecuta en un hilo aparte para que la persona no tenga que esperar a Claude
-    (ni al envío de su copia por correo) antes de ver la confirmación."""
+    (ni al envío de su copia por correo, ni al aviso al encargado) antes de ver la
+    confirmación."""
     try:
         _procesar_pipeline(rotulo, relato_id, contenido)
     except Exception:
@@ -204,6 +210,14 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
             enviar_copia_relato(correo, nombre, rotulo, contenido)
         except Exception:
             app.logger.exception("Error enviando la copia del relato a %s", correo)
+    try:
+        caso = models.obtener_caso(rotulo)
+        config = models.obtener_configuracion()
+        correo_encargado = config["correo_encargado"] if config else None
+        if caso and correo_encargado:
+            enviar_notificacion_relato_nuevo(correo_encargado, rotulo, caso["apellido"], nombre, link_caso_privado)
+    except Exception:
+        app.logger.exception("Error avisando al encargado del nuevo relato en el caso %s", rotulo)
 
 
 def _sintetizar_en_segundo_plano(rotulo: str):
@@ -370,6 +384,22 @@ def encargado_guardar_colegio():
     return redirect(url_for("encargado_configuracion"))
 
 
+@app.route("/encargado/configuracion/retencion", methods=["POST"])
+@login_requerido
+def encargado_guardar_retencion():
+    crudo = (request.form.get("dias_retencion") or "").strip()
+    try:
+        dias = int(crudo)
+    except ValueError:
+        dias = 0
+    if dias < 1 or dias > 365:
+        flash("El período de retención debe ser un número de días entre 1 y 365.", "error")
+        return redirect(url_for("encargado_configuracion"))
+    models.guardar_dias_retencion(dias)
+    flash(f"Período de retención actualizado a {dias} días.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
 @app.route("/encargado/configuracion/reglamento", methods=["POST"])
 @login_requerido
 def encargado_subir_reglamento():
@@ -454,17 +484,10 @@ def encargado_crear_caso():
     return redirect(url_for("encargado_caso", rotulo=caso["rotulo"]))
 
 
-@app.route("/encargado/casos/<rotulo>")
-@login_requerido
-def encargado_caso(rotulo):
-    caso = models.obtener_caso(rotulo)
-    if not caso:
-        abort(404)
-    relatos = models.listar_relatos(rotulo)
-    historial = models.listar_historial(rotulo)
-    destinatarios = models.listar_destinatarios(rotulo)
-
-    # Numera los relatos cuando la misma persona sube más de uno (Relato 1, Relato 2…).
+def _numerar_relatos(relatos) -> dict:
+    """Numera los relatos cuando la misma persona sube más de uno (Relato 1, Relato 2…) —
+    se usa tanto para mostrarlos en pantalla como para nombrar el archivo al descargar uno
+    por separado."""
     conteo_nombre = {}
     total_por_nombre = {}
     for r in relatos:
@@ -476,6 +499,20 @@ def encargado_caso(rotulo):
         if total_por_nombre.get(clave, 0) > 1:
             conteo_nombre[clave] = conteo_nombre.get(clave, 0) + 1
             numero_relato[r["id"]] = conteo_nombre[clave]
+    return numero_relato
+
+
+@app.route("/encargado/casos/<rotulo>")
+@login_requerido
+def encargado_caso(rotulo):
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    relatos = models.listar_relatos(rotulo)
+    historial = models.listar_historial(rotulo)
+    destinatarios = models.listar_destinatarios(rotulo)
+
+    numero_relato = _numerar_relatos(relatos)
 
     # El botón "Actualizar síntesis" se destaca si llegaron relatos nuevos después de la
     # última síntesis generada.
@@ -619,8 +656,9 @@ def encargado_informe(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
         abort(404)
+    dias_retencion = models.dias_retencion()
     if caso["estado"] == "purgado":
-        flash("Este caso ya fue purgado (pasaron más de 15 días desde que se emitió el informe) — ya no está disponible.", "error")
+        flash(f"Este caso ya fue purgado (pasaron más de {dias_retencion} días desde que se emitió el informe) — ya no está disponible.", "error")
         return redirect(url_for("encargado_caso", rotulo=rotulo))
     relatos = models.listar_relatos(rotulo)
     config = models.obtener_configuracion()
@@ -634,15 +672,48 @@ def encargado_informe(rotulo):
     models.marcar_informe_emitido(rotulo)
     models.registrar_historial(
         rotulo, actor=actor_encargado(),
-        accion="Descargó el informe final del caso." + (" El caso queda cerrado; en 15 días se eliminará el detalle de los relatos y la síntesis, quedando solo este historial." if era_abierto else ""),
+        accion="Descargó el informe final del caso." + (f" El caso queda cerrado; en {dias_retencion} días se eliminará el detalle de los relatos y la síntesis, quedando solo este historial." if era_abierto else ""),
     )
 
     correo_encargado = config["correo_encargado"] if config else None
     if era_abierto and correo_encargado:
-        threading.Thread(
-            target=lambda: enviar_informe_encargado(correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo),
-            daemon=True,
-        ).start()
+        def _enviar_respaldo_informe():
+            try:
+                enviar_informe_encargado(correo_encargado, rotulo, caso["apellido"], docx_bytes, nombre_archivo, dias_retencion)
+            except Exception:
+                app.logger.exception("Error enviando el respaldo del informe del caso %s a %s", rotulo, correo_encargado)
+        threading.Thread(target=_enviar_respaldo_informe, daemon=True).start()
+
+    from io import BytesIO
+    return send_file(
+        BytesIO(docx_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        as_attachment=True,
+        download_name=nombre_archivo,
+    )
+
+
+def _slug_archivo(texto: str) -> str:
+    texto = re.sub(r"[^\w\s-]", "", (texto or "").strip().lower())
+    return re.sub(r"[\s-]+", "-", texto) or "relato"
+
+
+@app.route("/encargado/casos/<rotulo>/relatos/<int:relato_id>/descargar")
+@login_requerido
+def encargado_descargar_relato(rotulo, relato_id):
+    """Descarga un relato individual como Word — para que el encargado pueda guardarlo en
+    su computador sin tener que descargar (y con eso, cerrar) el informe completo del caso."""
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        abort(404)
+    relato = models.obtener_relato(relato_id)
+    if not relato or relato["caso_id"] != caso["id"]:
+        abort(404)
+
+    numero = _numerar_relatos(models.listar_relatos(rotulo)).get(relato_id)
+    docx_bytes = construir_relato_docx(caso, relato, numero=numero)
+    sufijo_numero = f"-relato{numero}" if numero else ""
+    nombre_archivo = f"relato_{_slug_archivo(relato['nombre_persona'])}{sufijo_numero}_{rotulo}.docx"
 
     from io import BytesIO
     return send_file(
@@ -712,12 +783,13 @@ def caso_publico_enviar(rotulo):
 
     relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido, correo_persona=correo)
 
-    # El análisis con Claude (y el envío de la copia por correo) puede tardar
-    # bastante — se hace en segundo plano para que la persona vea la confirmación
-    # de inmediato en vez de tener que esperar.
+    # El análisis con Claude (y el envío de la copia por correo, y el aviso al encargado)
+    # puede tardar bastante — se hace en segundo plano para que la persona vea la
+    # confirmación de inmediato en vez de tener que esperar. El link privado se arma acá
+    # (con contexto de request todavía disponible) y se pasa ya armado al hilo.
     threading.Thread(
         target=_procesar_relato_en_segundo_plano,
-        args=(rotulo, relato_id, contenido, nombre, correo),
+        args=(rotulo, relato_id, contenido, nombre, correo, link_caso_privado(rotulo)),
         daemon=True,
     ).start()
 
@@ -743,10 +815,11 @@ def tarea_recordatorios():
             models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
             enviados += 1
 
-    rotulos_a_purgar = models.casos_para_purgar()
+    dias_retencion = models.dias_retencion()
+    rotulos_a_purgar = models.casos_para_purgar(dias=dias_retencion)
     for rotulo in rotulos_a_purgar:
         try:
-            models.purgar_caso(rotulo)
+            models.purgar_caso(rotulo, dias=dias_retencion)
         except Exception:
             app.logger.exception("Error purgando el caso %s", rotulo)
 

@@ -9,35 +9,39 @@
 {% endblock %}
 {% block content %}
 
-<div style="display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; margin-bottom:6px;">
-  <div>
-    <div class="label-mono">{{ caso['rotulo'] }}</div>
-    <h1 style="font-size:24px; margin-top:4px;">Caso {{ caso['apellido'] }}</h1>
-    <p style="color:var(--ink-muted); font-size:13px; margin-top:4px;">
-      Creado {{ caso['creado_en']|fecha }}
-      {% if caso['nivel_urgencia'] %} · <span class="pill pill-{{ caso['nivel_urgencia'] }}">Urgencia {{ caso['nivel_urgencia'] }}</span>{% endif %}
-      {% if caso['titulo'] %} · {{ caso['titulo'] }}{% endif %}
-      {% if caso['estado'] != 'abierto' %} · <span class="pill pill-{{ caso['estado'] }}">{{ caso['estado']|capitalize }}</span>{% endif %}
-      {% if caso['fecha_limite'] and caso['estado'] == 'abierto' %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
-    </p>
-  </div>
-  <div style="display:flex; gap:8px; flex-wrap:wrap;">
-    {% if caso['sintesis_general'] and caso['estado'] != 'purgado' %}
-    <a class="btn btn-primary" href="{{ url_for('encargado_informe', rotulo=caso['rotulo']) }}">Descargar informe (Word){% if caso['estado'] == 'abierto' %} y cerrar caso{% endif %}</a>
-    {% endif %}
-    {% if caso['estado'] == 'abierto' %}
-    <form method="post" action="{{ url_for('encargado_sintetizar', rotulo=caso['rotulo']) }}">
-      <button type="submit" class="btn btn-ghost{{ ' btn-destacado' if sintesis_desactualizada else '' }}">{{ 'Actualizar síntesis' if caso['sintesis_general'] else 'Generar síntesis' }}</button>
-    </form>
-    {% if sintesis_desactualizada %}<span class="pill pill-medio" style="align-self:center;">Hay relatos nuevos</span>{% endif %}
-    {% endif %}
-  </div>
+<div style="margin-bottom:10px;">
+  <div class="label-mono">{{ caso['rotulo'] }}</div>
+  <h1 style="font-size:24px; margin-top:4px;">Caso {{ caso['apellido'] }}</h1>
+  <p style="color:var(--ink-muted); font-size:13px; margin-top:4px;">
+    Creado {{ caso['creado_en']|fecha }}
+    {% if caso['nivel_urgencia'] %} · <span class="pill pill-{{ caso['nivel_urgencia'] }}">Urgencia {{ caso['nivel_urgencia'] }}</span>{% endif %}
+    {% if caso['titulo'] %} · {{ caso['titulo'] }}{% endif %}
+    {% if caso['estado'] != 'abierto' %} · <span class="pill pill-{{ caso['estado'] }}">{{ caso['estado']|capitalize }}</span>{% endif %}
+    {% if caso['fecha_limite'] and caso['estado'] == 'abierto' %} · <span class="pill {{ 'pill-alto' if caso['fecha_limite'] < hoy else 'pill-medio' }}">{{ 'Plazo vencido' if caso['fecha_limite'] < hoy else 'Plazo' }}: {{ caso['fecha_limite'] }}</span>{% endif %}
+  </p>
 </div>
 
+{# Hijo directo del bloque de contenido (no anidado en un div corto) a propósito: position:sticky
+   solo mantiene el elemento a la vista mientras se hace scroll DENTRO de la caja de su propio
+   padre — si el padre fuera solo esta fila de encabezado, el botón se "perdía" apenas se
+   scrolleaba más abajo que esa fila. Así, el padre efectivo es todo el contenido de la página. #}
+<div class="acciones-caso-sticky">
+  {% if caso['sintesis_general'] and caso['estado'] != 'purgado' %}
+  <a class="btn btn-primary" href="{{ url_for('encargado_informe', rotulo=caso['rotulo']) }}">Descargar informe (Word){% if caso['estado'] == 'abierto' %} y cerrar caso{% endif %}</a>
+  {% endif %}
+  {% if caso['estado'] == 'abierto' %}
+  <form method="post" action="{{ url_for('encargado_sintetizar', rotulo=caso['rotulo']) }}">
+    <button type="submit" class="btn btn-ghost{{ ' btn-destacado' if sintesis_desactualizada else '' }}">{{ 'Actualizar síntesis' if caso['sintesis_general'] else 'Generar síntesis' }}</button>
+  </form>
+  {% if sintesis_desactualizada %}<span class="pill pill-medio" style="align-self:center;">Hay relatos nuevos</span>{% endif %}
+  {% endif %}
+</div>
+
+{% set dias_retencion = (config_global['dias_retencion'] if config_global and config_global['dias_retencion'] else 15) %}
 {% if caso['estado'] == 'cerrado' %}
-<div class="flash flash-ok">Este caso está cerrado — se emitió el informe {{ caso['informe_emitido_en']|fecha }}. En 15 días se eliminará el detalle de los relatos y la síntesis, quedando solo el historial como respaldo estadístico.</div>
+<div class="flash flash-ok">Este caso está cerrado — se emitió el informe {{ caso['informe_emitido_en']|fecha }}. En {{ dias_retencion }} días se eliminará el detalle de los relatos y la síntesis, quedando solo el historial como respaldo estadístico.</div>
 {% elif caso['estado'] == 'purgado' %}
-<div class="flash flash-error">Este caso fue purgado el {{ caso['purgado_en']|fecha }} (pasaron 15 días desde el informe) — se eliminó el contenido de los {{ caso['n_relatos_purgado'] }} relato(s) y la síntesis. Queda solo este historial como respaldo estadístico.</div>
+<div class="flash flash-error">Este caso fue purgado el {{ caso['purgado_en']|fecha }} (pasaron {{ dias_retencion }} días desde el informe) — se eliminó el contenido de los {{ caso['n_relatos_purgado'] }} relato(s) y la síntesis. Queda solo este historial como respaldo estadístico.</div>
 {% endif %}
 
 <div class="section card" style="padding:20px;">
@@ -246,7 +250,7 @@
 {% else %}
 <div class="section card" style="padding:20px; color:var(--ink-muted); font-size:13.5px;">
   {% if caso['estado'] == 'purgado' %}
-  El contenido de este caso ya fue purgado según la política de retención de 15 días.
+  El contenido de este caso ya fue purgado según la política de retención de {{ dias_retencion }} días.
   {% else %}
   Todavía no hay síntesis general — se genera automáticamente apenas llegue el primer relato (puede
   tardar uno o dos minutos; recarga la página), o puedes generarla manualmente con el botón de arriba.
@@ -269,6 +273,9 @@
       <summary style="cursor:pointer; font-size:12.5px; color:var(--accent-strong);">Ver relato completo</summary>
       <div class="relato-box" style="margin-top:8px;">{{ r['contenido'] }}</div>
     </details>
+    <div style="margin-top:10px;">
+      <a class="btn btn-ghost" style="padding:6px 12px; font-size:12px;" href="{{ url_for('encargado_descargar_relato', rotulo=caso['rotulo'], relato_id=r['id']) }}">Descargar este relato (Word)</a>
+    </div>
   </div>
   {% else %}
   <div class="card" style="padding:24px; text-align:center; color:var(--ink-faint); font-size:13.5px;">Aún no llegan relatos a este caso.</div>

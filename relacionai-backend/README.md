@@ -287,21 +287,37 @@ llenarlos:
 
 ## Próximos pasos sugeridos
 
-- Disco persistente / Postgres antes de tener clientes reales (ver checklist).
+Hechos en esta ronda:
+
+- **Notificación al encargado por correo cuando llega un relato nuevo** (además
+  de la copia que recibe quien lo sube) — ya no depende de revisar el panel
+  manualmente para enterarse. Ver `email_client.enviar_notificacion_relato_nuevo`.
+- **Período de retención configurable** desde `/encargado/configuracion`
+  (antes 15 días fijos en `models.casos_para_purgar`) — cada colegio puede
+  ajustar cuántos días se guarda el detalle de un caso cerrado antes de
+  purgarse.
+
+Pendientes — decisiones de infraestructura o de alcance, no solo de código,
+así que se dejan para que el dueño del producto las resuelva antes de vender
+a varios colegios reales:
+
+- Disco persistente / Postgres antes de tener clientes reales (ver checklist)
+  — requiere subir de plan en Render (o migrar a otro proveedor), es una
+  decisión de costo, no algo que se resuelva solo con un cambio de código.
 - Si se vende a varios colegios: separar cada uno en su propio despliegue
-  (base de datos y contraseña propias) — esta versión es de un solo colegio.
+  (base de datos y contraseña propias) — esta versión ya está pensada para
+  un colegio por despliegue (por eso "Nombre del colegio" es un solo campo de
+  configuración); vender a varios colegios significa repetir el despliegue,
+  no cambiar el código.
 - Autenticación real por encargado (si hay más de una persona revisando
   casos) en vez de una sola contraseña compartida — hoy el historial usa el
   nombre configurado en "Datos del encargado" como aproximación de "quién
   hizo la acción", que funciona bien con un solo encargado pero no distingue
-  entre varias personas que compartan el mismo login.
+  entre varias personas que comparten el mismo login. Implementarlo bien
+  significa cuentas individuales con su propio login — un cambio de alcance
+  considerable, mejor confirmarlo antes de emprenderlo.
 - El procesamiento con Claude (relatos nuevos, subir el reglamento interno, y
   generar la síntesis manualmente) ya corre en un hilo en segundo plano — no
   bloquea la respuesta ni arriesga un error del servidor por demora; si el
   volumen de casos crece mucho, migrar a una cola de tareas real (Celery/RQ)
   para mayor robustez.
-- Notificar al encargado (correo/WhatsApp) cuando llega un relato nuevo, en
-  vez de que tenga que revisar el panel manualmente.
-- Hacer configurable el período de retención (hoy 15 días fijos en
-  `models.casos_para_purgar`) desde el panel, si distintos colegios quieren
-  plazos distintos.
