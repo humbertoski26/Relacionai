@@ -1,33 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Configuración — Relacionai{% endblock %}
+{% block title %}Configuración — RelacionAI{% endblock %}
 {% block topnav %}
 <div class="topnav">
   <a href="{{ url_for('encargado_dashboard') }}">← Todos los casos</a>
-  <a href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
+  <a class="btn-framed" href="{{ url_for('encargado_logout') }}">Cerrar sesión</a>
 </div>
 {% endblock %}
 {% block content %}
 
-<h1 style="font-size:22px; margin-bottom:18px;">Configuración</h1>
+{% set paso1_listo = config['nombre_encargado'] %}
+{% set paso2_listo = config['reglamento_nombre_archivo'] %}
 
-<div class="card" style="padding:22px; margin-bottom:20px;">
-  <h3>Datos del encargado</h3>
-  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:14px;">Aparecen al final de cada informe descargable, como firma.</p>
+<h1 style="font-size:22px; margin-bottom:6px;">Configuración</h1>
+<p style="font-size:13px; color:var(--ink-muted); margin-bottom:18px;">Dos pasos rápidos antes de empezar a crear casos.</p>
+
+<div class="card {{ 'box-highlight' if not paso1_listo else 'box-done' }}" style="padding:22px; margin-bottom:20px;">
+  <h3>1. Datos del encargado</h3>
+  <p style="font-size:13px; color:var(--ink-muted); margin-bottom:14px;">Aparecen al final de cada informe descargable, como firma — y el correo es donde se envía automáticamente el informe cuando se cierra un caso.</p>
   <form method="post" action="{{ url_for('encargado_guardar_datos') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
-    <div class="field" style="margin-bottom:0; flex:1; min-width:220px;">
+    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
       <label for="nombre_encargado">Nombre</label>
       <input type="text" id="nombre_encargado" name="nombre_encargado" value="{{ config['nombre_encargado'] or '' }}" placeholder="Ej: María Pérez">
     </div>
-    <div class="field" style="margin-bottom:0; flex:1; min-width:220px;">
+    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
       <label for="cargo_encargado">Cargo</label>
       <input type="text" id="cargo_encargado" name="cargo_encargado" value="{{ config['cargo_encargado'] or '' }}" placeholder="Ej: Encargada de Convivencia Escolar">
+    </div>
+    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
+      <label for="correo_encargado">Tu correo</label>
+      <input type="email" id="correo_encargado" name="correo_encargado" value="{{ config['correo_encargado'] or '' }}" placeholder="tucorreo@colegio.cl">
     </div>
     <button type="submit" class="btn btn-primary">Guardar</button>
   </form>
 </div>
 
-<div class="card" style="padding:22px;">
-  <h3>Reglamento interno</h3>
+<div class="card {{ 'box-highlight' if (paso1_listo and not paso2_listo) else ('box-done' if paso2_listo else '') }}" style="padding:22px; margin-bottom:20px;">
+  <h3>2. Reglamento interno</h3>
   <p style="font-size:13px; color:var(--ink-muted); margin-bottom:14px;">
     Si lo subes, en cada síntesis Claude va a revisar qué indica tu reglamento interno para el caso
     que se está analizando, en una sección aparte ("Pasos del Reglamento Interno"), además de las
@@ -69,10 +77,16 @@
   {% endif %}
 
   <form method="post" action="{{ url_for('encargado_subir_reglamento') }}" enctype="multipart/form-data" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <input type="file" name="reglamento" accept=".docx,.pdf,.txt" required>
-    <button type="submit" class="btn btn-primary">{{ 'Reemplazar reglamento' if config['reglamento_nombre_archivo'] else 'Subir reglamento' }}</button>
+    <input type="file" name="reglamento" accept=".docx,.pdf,.txt" {{ '' if paso2_listo else 'required' }}>
+    <button type="submit" class="btn btn-primary">{{ 'Reemplazar reglamento' if paso2_listo else 'Subir reglamento' }}</button>
   </form>
-  <div class="hint" style="margin-top:8px;">Word (.docx), PDF o texto plano.</div>
+  <div class="hint" style="margin-top:8px;">Word (.docx), PDF o texto plano — este paso es opcional, puedes seguir sin subirlo.</div>
 </div>
+
+{% if paso1_listo %}
+<div style="text-align:center; margin-top:8px;">
+  <a class="btn btn-primary" href="{{ url_for('encargado_dashboard') }}">Ir a los casos →</a>
+</div>
+{% endif %}
 
 {% endblock %}

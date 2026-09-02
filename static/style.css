@@ -43,11 +43,19 @@ a{ color:var(--accent-strong); }
 
 .topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border); }
 .brand{ display:flex; align-items:baseline; gap:10px; text-decoration:none; }
-.brand .mark{ font-family:var(--font-display); font-style:italic; font-weight:600; font-size:24px; color:var(--accent-strong); }
-.brand .tag{ font-size:12px; color:var(--ink-muted); font-family:var(--font-mono); }
-.topnav{ display:flex; gap:14px; align-items:center; font-size:13.5px; }
+.brand .mark{ font-family:var(--font-display); font-weight:600; font-size:24px; color:var(--ink); }
+.brand .mark em{ font-style:italic; color:var(--accent-strong); }
+.brand .tag{ font-size:12px; color:var(--ink-muted); font-family:var(--font-mono); max-width:300px; line-height:1.35; }
+.subnav{ font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-faint); font-family:var(--font-mono); margin:-14px 0 20px; }
+.topnav{ display:flex; gap:10px; align-items:center; font-size:13.5px; }
 .topnav a{ color:var(--ink-muted); text-decoration:none; font-weight:600; }
 .topnav a:hover{ color:var(--ink); }
+.btn-icon{ display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:8px; background:var(--surface-sunken); border:1px solid var(--border); color:var(--ink-muted); text-decoration:none; font-size:16px; transition:background .15s,color .15s; }
+.btn-icon:hover{ background:var(--accent-soft); color:var(--accent-strong); }
+.btn-framed{ padding:8px 14px; border-radius:8px; border:1.5px solid var(--border); color:var(--ink-muted); text-decoration:none; font-weight:700; font-size:12.5px; }
+.btn-framed:hover{ border-color:var(--danger); color:var(--danger); }
+.footer-brand{ display:flex; align-items:center; gap:8px; }
+.footer-gaduai{ display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:5px; background:var(--accent-strong); color:#fff; font-family:var(--font-display); font-weight:700; font-size:12px; }
 
 .card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); }
 
@@ -78,6 +86,22 @@ textarea{ min-height:180px; resize:vertical; line-height:1.6; }
 .pill-abierto,.pill-bajo{ background:var(--good-soft); color:var(--good); }
 .pill-medio{ background:var(--warn-soft); color:var(--warn); }
 .pill-alto{ background:var(--danger-soft); color:var(--danger); }
+.pill-cerrado{ background:var(--surface-sunken); color:var(--ink-muted); }
+.pill-purgado{ background:var(--surface-sunken); color:var(--ink-faint); }
+
+.box-highlight{ border:1.5px solid var(--accent); box-shadow:0 0 0 3px var(--accent-soft); border-radius:10px; transition:box-shadow .25s, border-color .25s; }
+.box-done{ opacity:.55; }
+.btn-destacado{ animation:pulso 1.8s ease-in-out infinite; }
+@keyframes pulso{ 0%,100%{ box-shadow:0 0 0 0 rgba(46,107,99,.35); } 50%{ box-shadow:0 0 0 6px rgba(46,107,99,0); } }
+
+.email-row{ display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.email-row input{ flex:1; }
+.email-row input.input-error{ border-color:var(--danger); background:var(--danger-soft); }
+.email-row .btn-quitar{ background:transparent; border:none; color:var(--ink-faint); cursor:pointer; font-size:16px; padding:4px 8px; }
+.email-row .btn-quitar:hover{ color:var(--danger); }
+.email-error-msg{ font-size:11.5px; color:var(--danger); margin:-4px 0 8px; }
+.btn-agregar-correo{ background:transparent; border:1px dashed var(--border); color:var(--accent-strong); border-radius:8px; padding:8px 14px; font-weight:700; font-size:13px; cursor:pointer; }
+.btn-agregar-correo:hover{ background:var(--accent-soft); }
 
 .stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
 .stat{ padding:16px 18px; }
@@ -108,3 +132,5 @@ code.linkbox{ display:block; background:var(--surface-sunken); border:1px solid 
 .method-btn.active{ background:var(--accent-soft); border-color:var(--accent); color:var(--accent-ink); }
 
 footer{ margin-top:40px; padding-top:18px; border-top:1px solid var(--border); font-size:11.5px; color:var(--ink-faint); }
+
+.numero-relato{ font-family:var(--font-mono); font-size:11px; color:var(--accent-strong); background:var(--accent-soft); padding:2px 8px; border-radius:999px; margin-left:6px; }
