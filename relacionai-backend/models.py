@@ -183,6 +183,35 @@ def listar_casos():
         ).fetchall()
 
 
+def casos_pasados_resumen(excluir_rotulo: str = "", limite: int = 6):
+    """
+    Últimos casos ya sintetizados (para que la síntesis de un caso nuevo pueda
+    considerar patrones y criterios ya usados antes en el mismo establecimiento —
+    sin mezclar los hechos concretos de un caso con otro). No incluye el
+    contenido de los relatos, solo problemas / pasos de reglamento / sugerencias
+    ya generados.
+    """
+    with get_conn() as conn:
+        filas = conn.execute(
+            """SELECT rotulo, apellido, problemas_json, pasos_reglamento_json, soluciones_json, nivel_urgencia
+               FROM casos
+               WHERE sintesis_general IS NOT NULL AND rotulo != ?
+               ORDER BY sintesis_generada_en DESC
+               LIMIT ?""",
+            (excluir_rotulo or "", limite),
+        ).fetchall()
+    resultado = []
+    for f in filas:
+        resultado.append({
+            "rotulo": f["rotulo"],
+            "problemas": json.loads(f["problemas_json"]) if f["problemas_json"] else [],
+            "pasos_reglamento": json.loads(f["pasos_reglamento_json"]) if f["pasos_reglamento_json"] else [],
+            "sugerencias": json.loads(f["soluciones_json"]) if f["soluciones_json"] else [],
+            "nivel_urgencia": f["nivel_urgencia"] or "medio",
+        })
+    return resultado
+
+
 def set_fecha_limite(rotulo: str, fecha_limite: str):
     """fecha_limite: fecha en formato YYYY-MM-DD, o cadena vacía/None para quitarla."""
     with get_conn() as conn:

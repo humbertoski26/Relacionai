@@ -44,6 +44,10 @@ en un informe descargable para el encargado de convivencia.
    la síntesis, los problemas identificados, los pasos del reglamento interno
    (si aplica), las sugerencias de acción, el listado de relatos incluidos, y
    su nombre y cargo al final (configurables en "Configuración").
+7. Cada síntesis nueva considera además, como referencia, los problemas y
+   sugerencias de los últimos casos ya sintetizados en el mismo establecimiento
+   (sin mezclar los hechos concretos de un caso con otro) — así la plataforma
+   va acumulando criterio de un caso a otro en vez de partir de cero siempre.
 
 ## Stack
 

@@ -115,11 +115,15 @@ def resumir_relato(texto: str) -> str:
         return f"[No se pudo generar el resumen automático: {exc}]"
 
 
-def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") -> dict:
+def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "", casos_pasados: list = None) -> dict:
     """
     relatos: lista de dicts {nombre, formato, contenido, resumen}
     reglamento_texto: texto del reglamento interno de la institución (opcional). Si se
       entrega, se pide además una lista separada de pasos según ese reglamento.
+    casos_pasados: lista opcional de dicts {rotulo, problemas, pasos_reglamento, sugerencias,
+      nivel_urgencia} de casos anteriores ya sintetizados (sin el contenido de sus relatos),
+      para que la plataforma "aprenda" de la experiencia acumulada del establecimiento sin
+      mezclar los hechos concretos de un caso con otro.
     Devuelve: {sintesis, problemas: [...], pasos_reglamento: [...], sugerencias: [...], nivel_urgencia}
     """
     if not _api_key_configurada():
@@ -154,13 +158,37 @@ def sintetizar_caso(apellido: str, relatos: list, reglamento_texto: str = "") ->
         bloque_reglamento = ""
         pide_pasos_reglamento = ""
 
+    if casos_pasados:
+        lineas = []
+        for c in casos_pasados:
+            partes = [f"urgencia {c.get('nivel_urgencia', 'medio')}"]
+            if c.get("problemas"):
+                partes.append("problemas: " + "; ".join(c["problemas"][:4]))
+            if c.get("pasos_reglamento"):
+                partes.append("pasos de reglamento aplicados: " + "; ".join(c["pasos_reglamento"][:3]))
+            if c.get("sugerencias"):
+                partes.append("sugerencias dadas: " + "; ".join(c["sugerencias"][:4]))
+            lineas.append(f"- Caso {c.get('rotulo', '')} ({', '.join(partes)})")
+        bloque_casos_pasados = (
+            "\n\nCASOS ANTERIORES DEL MISMO ESTABLECIMIENTO (solo como referencia de patrones y "
+            "criterios ya usados — son casos DISTINTOS e independientes; no mezcles sus hechos con "
+            "los del caso actual ni asumas que están relacionados):\n"
+            + "\n".join(lineas) + "\n\n"
+            "Si el caso actual repite un patrón visible en estos casos anteriores (mismo tipo de "
+            "conflicto, mismas personas, o una sugerencia que ya se dio antes y no funcionó), "
+            "puedes mencionarlo brevemente en la síntesis o proponer una sugerencia más específica "
+            "en vez de repetir literalmente la misma recomendación genérica."
+        )
+    else:
+        bloque_casos_pasados = ""
+
     prompt = (
         "Eres una persona analista experta en relaciones interpersonales y convivencia, apoyando a "
         "quien coordina un caso. A continuación hay varios relatos personales recogidos sobre un mismo "
         "caso (identificado por el apellido «" + apellido + "»), posiblemente contados por distintas "
         "personas involucradas o testigos. Cada uno puede tener una versión distinta de los hechos.\n\n"
         "RELATOS DEL CASO:\n\"\"\"\n" + relatos_texto + "\n\"\"\"\n"
-        + bloque_reglamento + "\n"
+        + bloque_reglamento + bloque_casos_pasados + "\n"
         "Responde ÚNICAMENTE con un objeto JSON con esta forma exacta (sin texto fuera del JSON):\n"
         "{\n"
         '  "sintesis": "síntesis general del caso integrando todos los relatos, en 4 a 8 frases, '

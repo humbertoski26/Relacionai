@@ -98,7 +98,8 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
     caso = models.obtener_caso(rotulo)
     config = models.obtener_configuracion()
     reglamento_texto = config["reglamento_texto"] if config else ""
-    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
+    casos_pasados = models.casos_pasados_resumen(excluir_rotulo=rotulo)
+    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto, casos_pasados=casos_pasados)
     models.guardar_sintesis_general(
         rotulo, resultado["sintesis"],
         resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
@@ -304,7 +305,8 @@ def encargado_sintetizar(rotulo):
     ]
     config = models.obtener_configuracion()
     reglamento_texto = config["reglamento_texto"] if config else ""
-    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto)
+    casos_pasados = models.casos_pasados_resumen(excluir_rotulo=rotulo)
+    resultado = sintetizar_caso(caso["apellido"], entrada, reglamento_texto=reglamento_texto, casos_pasados=casos_pasados)
     models.guardar_sintesis_general(
         rotulo, resultado["sintesis"],
         resultado["problemas"], resultado["pasos_reglamento"], resultado["sugerencias"], resultado["nivel_urgencia"],
