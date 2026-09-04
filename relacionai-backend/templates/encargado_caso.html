@@ -73,14 +73,15 @@
   <form method="post" action="{{ url_for('encargado_agregar_destinatarios', rotulo=caso['rotulo']) }}" enctype="multipart/form-data" id="form-destinatarios">
     <div id="filas-correo">
       <div class="email-row">
-        <input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">
+        <input type="email" class="email-input" placeholder="correo@ejemplo.cl" autocomplete="off" data-lpignore="true" data-1p-ignore>
         <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
       </div>
       <div class="email-row">
-        <input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">
+        <input type="email" class="email-input" placeholder="correo@ejemplo.cl" autocomplete="off" data-lpignore="true" data-1p-ignore>
         <button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar" style="visibility:hidden;">✕</button>
       </div>
     </div>
+    <input type="hidden" name="emails" id="emails-combinados">
     <button type="button" class="btn-agregar-correo" id="btn-mas-correo">+ Agregar otro correo</button>
 
     <div class="field" style="margin-top:14px;">
@@ -140,7 +141,7 @@
     btnMas.addEventListener('click', function () {
       var fila = document.createElement('div');
       fila.className = 'email-row';
-      fila.innerHTML = '<input type="email" name="emails" placeholder="correo@ejemplo.cl" autocomplete="off">' +
+      fila.innerHTML = '<input type="email" class="email-input" placeholder="correo@ejemplo.cl" autocomplete="off" data-lpignore="true" data-1p-ignore>' +
         '<button type="button" class="btn-quitar" title="Quitar" aria-label="Quitar">✕</button>';
       contenedor.appendChild(fila);
       fila.querySelector('.btn-quitar').addEventListener('click', function () { fila.remove(); });
@@ -152,22 +153,31 @@
       });
     });
     var formDestinatarios = document.getElementById('form-destinatarios');
+    var campoCombinado = document.getElementById('emails-combinados');
     if (formDestinatarios) {
       formDestinatarios.addEventListener('submit', function (ev) {
         var valido = true;
         var re = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-        contenedor.querySelectorAll('input[name="emails"]').forEach(function (input) {
+        var valores = [];
+        contenedor.querySelectorAll('.email-input').forEach(function (input) {
           input.classList.remove('input-error');
           var v = input.value.trim();
           if (v && !re.test(v)) {
             input.classList.add('input-error');
             valido = false;
+          } else if (v) {
+            valores.push(v);
           }
         });
         if (!valido) {
           ev.preventDefault();
           alert('Revisa los correos marcados en rojo — falta la arroba o la extensión (ej. .cl, .com).');
+          return;
         }
+        // Cada input se completa por separado (sin name compartido, para que Safari/Chrome
+        // no autocompleten el mismo valor en varias filas) — recién aquí se juntan en el
+        // único campo "emails" que espera el backend.
+        campoCombinado.value = valores.join('\n');
       });
     }
   })();
