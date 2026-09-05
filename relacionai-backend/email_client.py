@@ -19,14 +19,32 @@ envían nada (y quien las llama puede seguir con el resto del flujo).
 
 import logging
 import os
+import re
 import smtplib
 from email.message import EmailMessage
 
 logger = logging.getLogger("relacionai.email")
 
 
+def _limpiar(valor):
+    """Saca cualquier espacio (incluido el espacio de no separación \\xa0 que Gmail deja al
+    copiar la contraseña de aplicación agrupada en bloques de 4) — sin esto, smtplib falla
+    con UnicodeEncodeError al armar el mensaje de autenticación."""
+    return re.sub(r"\s+", "", valor) if valor else valor
+
+
 def _configurado() -> bool:
     return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_USER") and os.environ.get("SMTP_PASSWORD"))
+
+
+def _credenciales():
+    host = _limpiar(os.environ.get("SMTP_HOST"))
+    port = int(_limpiar(os.environ.get("SMTP_PORT")) or "587")
+    usuario = _limpiar(os.environ.get("SMTP_USER"))
+    password = _limpiar(os.environ.get("SMTP_PASSWORD"))
+    remitente = _limpiar(os.environ.get("SMTP_FROM")) or usuario
+    usar_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
+    return host, port, usuario, password, remitente, usar_tls
 
 
 def _enviar(destinatario: str, asunto: str, cuerpo: str) -> bool:
@@ -34,12 +52,7 @@ def _enviar(destinatario: str, asunto: str, cuerpo: str) -> bool:
         logger.info("SMTP no configurado; no se envía correo a %s (%s)", destinatario, asunto)
         return False
 
-    host = os.environ.get("SMTP_HOST")
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    usuario = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASSWORD")
-    remitente = os.environ.get("SMTP_FROM") or usuario
-    usar_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
+    host, port, usuario, password, remitente, usar_tls = _credenciales()
 
     msg = EmailMessage()
     msg["Subject"] = asunto
@@ -99,12 +112,7 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
         logger.info("SMTP no configurado; no se envía el informe del caso %s a %s", rotulo, email)
         return False
 
-    host = os.environ.get("SMTP_HOST")
-    port = int(os.environ.get("SMTP_PORT", "587"))
-    usuario = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASSWORD")
-    remitente = os.environ.get("SMTP_FROM") or usuario
-    usar_tls = os.environ.get("SMTP_USE_TLS", "1") != "0"
+    host, port, usuario, password, remitente, usar_tls = _credenciales()
 
     prefijo = f"[{nombre_colegio}] " if nombre_colegio else ""
     msg = EmailMessage()
