@@ -520,6 +520,15 @@ def encargado_guardar_retencion():
     return redirect(url_for("encargado_configuracion"))
 
 
+@app.route("/encargado/configuracion/gaduai", methods=["POST"])
+@login_requerido
+def encargado_guardar_gaduai_url():
+    url = (request.form.get("gaduai_url") or "").strip()
+    models.guardar_gaduai_url(url)
+    flash("Link a GADUAI guardado." if url else "Link a GADUAI eliminado.", "ok")
+    return redirect(url_for("encargado_configuracion"))
+
+
 @app.route("/encargado/configuracion/reglamento", methods=["POST"])
 @login_requerido
 def encargado_subir_reglamento():

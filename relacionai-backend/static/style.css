@@ -7,12 +7,14 @@
   --ink-muted: #6E675C;
   --ink-faint: #98917F;
 
-  --accent: #2E6B63;
-  --accent-strong: #1E4E48;
-  --accent-soft: #E1EBE8;
-  --accent-ink: #123B36;
+  /* colores institucionales de GADUAI — antes RelacionAI tenía su propia paleta
+     verde/teal (--accent:#2E6B63), ahora usa el mismo navy/cyan de la plataforma
+     GADUAI, para que se sienta parte de la misma familia visual. */
+  --accent: #22337E;
+  --accent-strong: #17B4D8;
+  --accent-soft: #E7E9F5;
+  --accent-ink: #16224F;
 
-  /* colores del logo oficial de GADUAI, usados donde aparece el nombre RelacionAI */
   --gaduai-navy: #22337E;
   --gaduai-cyan: #17B4D8;
 
@@ -31,7 +33,7 @@
   :root{
     --bg:#17191A; --surface:#1F2223; --surface-sunken:#17191A; --border:#33362F;
     --ink:#ECE8E0; --ink-muted:#A8A196; --ink-faint:#746C60;
-    --accent:#5CB0A2; --accent-strong:#7FCBBE; --accent-soft:#1E332F; --accent-ink:#B9E7DD;
+    --accent:#8C9AE8; --accent-strong:#4DD8F0; --accent-soft:#1E2547; --accent-ink:#C7CDF5;
     --gaduai-navy:#8C9AE8; --gaduai-cyan:#4DD8F0;
     --good:#6FBF7F; --good-soft:#1E3320; --warn:#D79A4B; --warn-soft:#362A16; --danger:#E08379; --danger-soft:#3A211D;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);

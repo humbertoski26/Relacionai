@@ -218,6 +218,7 @@ _MIGRATIONS = [
     ("configuracion", "insignia_nombre_archivo", "TEXT"),
     ("configuracion", "nombre_colegio", "TEXT"),
     ("configuracion", "dias_retencion", "INTEGER"),
+    ("configuracion", "gaduai_url", "TEXT"),
 ]
 
 DIAS_RETENCION_DEFECTO = 15
@@ -652,6 +653,13 @@ def dias_retencion() -> int:
 def guardar_dias_retencion(dias: int):
     with get_conn() as conn:
         conn.execute("UPDATE configuracion SET dias_retencion = ? WHERE id = 1", (int(dias),))
+
+
+def guardar_gaduai_url(url: str):
+    """Link al despliegue de GADUAI de este colegio — si está configurado, aparece un
+    botón en el header para volver ahí desde Relacionai."""
+    with get_conn() as conn:
+        conn.execute("UPDATE configuracion SET gaduai_url = ? WHERE id = 1", ((url or "").strip() or None,))
 
 
 def guardar_nombre_colegio(nombre_colegio: str):
