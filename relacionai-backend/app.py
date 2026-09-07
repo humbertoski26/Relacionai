@@ -659,12 +659,15 @@ def encargado_quitar_insignia():
 @app.route("/insignia")
 def ver_insignia():
     """Sirve la insignia del colegio — sin login, porque aparece en todas las páginas,
-    incluida la pública donde alguien sube su relato."""
+    incluida la pública donde alguien sube su relato. Con CORS abierto porque GADUAI
+    también la lee desde otro origen, para reusarla en sus documentos formales."""
     config = models.obtener_configuracion()
     if not config or not config["insignia_bytes"]:
         abort(404)
     from io import BytesIO
-    return send_file(BytesIO(config["insignia_bytes"]), mimetype=config["insignia_mime"] or "image/png")
+    resp = send_file(BytesIO(config["insignia_bytes"]), mimetype=config["insignia_mime"] or "image/png")
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    return resp
 
 
 @app.route("/encargado/casos", methods=["POST"])
