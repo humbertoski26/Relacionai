@@ -12,9 +12,14 @@ Dos zonas:
 Ver README.md para variables de entorno y despliegue.
 """
 
+import base64
 import functools
+import hashlib
+import hmac
+import json
 import os
 import re
+import time
 import urllib.parse
 from datetime import datetime
 
@@ -40,6 +45,30 @@ from report_docx import construir_informe_docx, construir_relato_docx
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 MAX_RELATOS_POR_PERSONA = 2  # por caso — al llegar al tope, el link queda deshabilitado para esa persona
+
+
+SSO_SHARED_SECRET = os.environ.get("SSO_SHARED_SECRET")
+
+
+def verificar_sso_token(token: str):
+    """Valida el token de acceso sin clave que GADUAI arma para Encargado de Convivencia y
+    Director al hacer login ahí — mismo secreto compartido (SSO_SHARED_SECRET) en ambos lados,
+    firmado con HMAC-SHA256. Devuelve el payload (correo, nombre, perfil) si es válido y no
+    expiró (2 minutos), None en cualquier otro caso."""
+    if not SSO_SHARED_SECRET or not token or "." not in token:
+        return None
+    b64, firma = token.split(".", 1)
+    esperada = hmac.new(SSO_SHARED_SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(firma, esperada):
+        return None
+    try:
+        relleno = "=" * (-len(b64) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(b64 + relleno))
+    except Exception:
+        return None
+    if payload.get("exp", 0) < time.time() * 1000:
+        return None
+    return payload
 
 
 def correo_valido(email: str) -> bool:
@@ -358,6 +387,25 @@ def encargado_login():
             return redirect(destino)
         flash("Correo o contraseña incorrectos, o la cuenta está desactivada.", "error")
     return render_template("encargado_login.html")
+
+
+@app.route("/sso")
+def sso_login():
+    """Entrada sin clave para quien ya inició sesión en GADUAI como Encargado de Convivencia
+    o Director — GADUAI arma este link con un token firmado de un solo uso (expira en 2
+    minutos). Si la cuenta no existe todavía en Relacionai, se crea sola."""
+    payload = verificar_sso_token(request.args.get("token", ""))
+    if not payload or not payload.get("correo"):
+        flash("El enlace de acceso desde GADUAI expiró o no es válido — ingresa con tu correo y clave.", "error")
+        return redirect(url_for("encargado_login"))
+    usuario = models.obtener_o_crear_usuario_sso(payload["correo"], payload.get("nombre") or payload["correo"])
+    if not usuario:
+        flash("Tu cuenta de Relacionai está desactivada — contacta al administrador.", "error")
+        return redirect(url_for("encargado_login"))
+    session["usuario_id"] = usuario["id"]
+    session["usuario_nombre"] = usuario["nombre"]
+    session["usuario_admin"] = usuario["es_admin"]
+    return redirect(url_for("encargado_dashboard"))
 
 
 @app.route("/encargado/logout")

@@ -20,6 +20,7 @@ import json
 import os
 import random
 import re
+import secrets
 import sqlite3
 import string
 import unicodedata
@@ -894,6 +895,27 @@ def obtener_usuario(usuario_id: int):
     with get_conn() as conn:
         fila = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
     return _fila_usuario_a_dict(fila) if fila else None
+
+
+def obtener_usuario_por_email(email: str):
+    email = (email or "").strip().lower()
+    if not email:
+        return None
+    with get_conn() as conn:
+        fila = conn.execute("SELECT * FROM usuarios WHERE email = ?", (email,)).fetchone()
+    return _fila_usuario_a_dict(fila) if fila else None
+
+
+def obtener_o_crear_usuario_sso(email: str, nombre: str):
+    """Usado por el acceso sin clave desde GADUAI (SSO): si la cuenta todavía no existe en
+    Relacionai, la crea con una contraseña aleatoria (que la persona puede cambiar después en
+    Configuración si alguna vez quiere entrar directo, sin pasar por GADUAI)."""
+    existente = obtener_usuario_por_email(email)
+    if existente:
+        if not existente["activo"]:
+            return None
+        return existente
+    return crear_usuario(nombre, email, secrets.token_urlsafe(12), es_admin=False)
 
 
 def verificar_login(email: str, password: str):
