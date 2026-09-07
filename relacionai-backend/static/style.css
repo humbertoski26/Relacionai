@@ -1,43 +1,33 @@
 :root{
-  --bg: #F1EEE8;
-  --surface: #FFFFFF;
-  --surface-sunken: #E9E5DD;
-  --border: #DCD6CA;
-  --ink: #2A2622;
-  --ink-muted: #6E675C;
-  --ink-faint: #98917F;
+  /* Mismo tema oscuro navy/slate de GADUAI, siempre activo (no solo en modo oscuro
+     del sistema) — para que al entrar desde el botón de GADUAI se sienta la misma
+     plataforma, no una app aparte con su propia paleta clara. */
+  --bg: #020617;
+  --surface: #0F172A;
+  --surface-sunken: #020617;
+  --border: #1E293B;
+  --ink: #F1F5F9;
+  --ink-muted: #94A3B8;
+  --ink-faint: #64748B;
 
-  /* colores institucionales de GADUAI — antes RelacionAI tenía su propia paleta
-     verde/teal (--accent:#2E6B63), ahora usa el mismo navy/cyan de la plataforma
-     GADUAI, para que se sienta parte de la misma familia visual. */
-  --accent: #22337E;
-  --accent-strong: #17B4D8;
-  --accent-soft: #E7E9F5;
-  --accent-ink: #16224F;
+  --accent: #8C9AE8;
+  --accent-strong: #4DD8F0;
+  --accent-soft: #1E2547;
+  --accent-ink: #C7CDF5;
 
-  --gaduai-navy: #22337E;
-  --gaduai-cyan: #17B4D8;
+  --gaduai-navy: #8C9AE8;
+  --gaduai-cyan: #4DD8F0;
 
-  --good: #3F7D4F; --good-soft: #E4EFE3;
-  --warn: #A3610C; --warn-soft: #F4E7D3;
-  --danger: #B0362A; --danger-soft: #F6E1DD;
+  --good: #6FBF7F; --good-soft: #1E3320;
+  --warn: #D79A4B; --warn-soft: #362A16;
+  --danger: #E08379; --danger-soft: #3A211D;
 
-  --shadow: 0 1px 2px rgba(30,25,15,.06), 0 8px 24px -12px rgba(30,25,15,.18);
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
   --radius: 10px;
 
   --font-display: "Fraunces", ui-serif, Georgia, serif;
   --font-body: "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-@media (prefers-color-scheme: dark){
-  :root{
-    --bg:#17191A; --surface:#1F2223; --surface-sunken:#17191A; --border:#33362F;
-    --ink:#ECE8E0; --ink-muted:#A8A196; --ink-faint:#746C60;
-    --accent:#8C9AE8; --accent-strong:#4DD8F0; --accent-soft:#1E2547; --accent-ink:#C7CDF5;
-    --gaduai-navy:#8C9AE8; --gaduai-cyan:#4DD8F0;
-    --good:#6FBF7F; --good-soft:#1E3320; --warn:#D79A4B; --warn-soft:#362A16; --danger:#E08379; --danger-soft:#3A211D;
-    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
-  }
 }
 *{ box-sizing:border-box; }
 body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55; }
