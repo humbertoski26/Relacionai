@@ -25,7 +25,7 @@ import sqlite3
 import string
 import unicodedata
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -220,6 +220,7 @@ _MIGRATIONS = [
     ("configuracion", "nombre_colegio", "TEXT"),
     ("configuracion", "dias_retencion", "INTEGER"),
     ("configuracion", "gaduai_url", "TEXT"),
+    ("casos", "aviso_gaduai_enviado_en", "TEXT"),
 ]
 
 DIAS_RETENCION_DEFECTO = 15
@@ -625,6 +626,29 @@ def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
                 pass
         resultado.append(row)
     return resultado
+
+
+def casos_relato_a_un_dia():
+    """Casos abiertos cuya fecha límite es exactamente mañana y a los que aún no se les
+    avisó a GADUAI — para el aviso + correo al encargado (distinto del recordatorio al
+    destinatario externo de arriba, que usa una ventana amplia de fechas futuras)."""
+    manana = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+    with get_conn() as conn:
+        return conn.execute(
+            """SELECT rotulo, fecha_limite FROM casos
+               WHERE estado = 'abierto'
+                 AND fecha_limite = ?
+                 AND aviso_gaduai_enviado_en IS NULL""",
+            (manana,),
+        ).fetchall()
+
+
+def marcar_aviso_gaduai_enviado(rotulo: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE casos SET aviso_gaduai_enviado_en = ? WHERE rotulo = ?",
+            (now_iso(), rotulo),
+        )
 
 
 # --------------------------------------------------------------- configuración

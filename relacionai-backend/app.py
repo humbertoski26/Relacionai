@@ -23,6 +23,8 @@ import time
 import urllib.parse
 from datetime import datetime
 
+import requests
+
 from flask import (
     Flask, abort, flash, redirect, render_template, request,
     send_file, session, url_for,
@@ -203,6 +205,26 @@ def actor_encargado() -> str:
     config = models.obtener_configuracion()
     nombre = config["nombre_encargado"] if config else None
     return nombre or "Encargado de convivencia"
+
+
+def avisar_gaduai(tipo: str, **datos):
+    """Avisa al despliegue de GADUAI de este colegio (aviso en su panel de Timeline, y
+    correo al encargado si corresponde) — best-effort: si GADUAI_URL/GADUAI_ADMIN_KEY no
+    están configurados, o si la llamada falla, no interrumpe el flujo de Relacionai."""
+    config = models.obtener_configuracion()
+    gaduai_url = (config["gaduai_url"] if config else None) or ""
+    admin_key = os.environ.get("GADUAI_ADMIN_KEY")
+    if not gaduai_url or not admin_key:
+        return
+    try:
+        requests.post(
+            gaduai_url.rstrip("/") + "/api/sistema/avisos",
+            json={"tipo": tipo, **datos},
+            headers={"X-Admin-Key": admin_key},
+            timeout=10,
+        )
+    except Exception:
+        app.logger.exception("No se pudo avisar a GADUAI (tipo=%s)", tipo)
 
 
 def link_correo(rotulo: str, apellido: str, descripcion: str = "", fecha_limite: str = "") -> str:
@@ -765,6 +787,8 @@ def encargado_agregar_destinatarios(rotulo):
         rotulo, actor=actor_encargado(),
         accion=f"Envió el link del caso a {len(nuevos)} destinatario(s) nuevo(s) ({', '.join(d['email'] for d in nuevos)}).",
     )
+    if enviados:
+        avisar_gaduai("relato_enviado", caso=rotulo, cantidad=enviados)
     flash(f"Se agregaron {len(nuevos)} destinatario(s)." + (f" Se envió la invitación por correo a {enviados}." if enviados else " No se pudo enviar el correo automático — revisa la configuración de SMTP; puedes compartir el link manualmente."), "ok")
     return redirect(url_for("encargado_caso", rotulo=rotulo))
 
@@ -979,6 +1003,14 @@ def tarea_recordatorios():
             models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
             enviados += 1
 
+    # Aviso a GADUAI (panel de avisos + correo al encargado) cuando a un caso le queda
+    # exactamente un día para vencer — este cron corre a las 9:00 am hora Chile, así que
+    # "queda un día" se cumple corriendo una vez al día sobre fecha_limite = mañana.
+    casos_a_un_dia = models.casos_relato_a_un_dia()
+    for c in casos_a_un_dia:
+        avisar_gaduai("relato_por_vencer", caso=c["rotulo"], fechaLimite=c["fecha_limite"])
+        models.marcar_aviso_gaduai_enviado(c["rotulo"])
+
     dias_retencion = models.dias_retencion()
     rotulos_a_purgar = models.casos_para_purgar(dias=dias_retencion)
     for rotulo in rotulos_a_purgar:
@@ -987,7 +1019,10 @@ def tarea_recordatorios():
         except Exception:
             app.logger.exception("Error purgando el caso %s", rotulo)
 
-    return {"revisados": len(pendientes), "enviados": enviados, "purgados": len(rotulos_a_purgar)}, 200
+    return {
+        "revisados": len(pendientes), "enviados": enviados,
+        "avisos_gaduai": len(casos_a_un_dia), "purgados": len(rotulos_a_purgar),
+    }, 200
 
 
 if __name__ == "__main__":
