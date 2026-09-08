@@ -679,6 +679,7 @@ def encargado_crear_caso():
         flash("Indica el apellido para rotular el caso.", "error")
         return redirect(url_for("encargado_dashboard"))
     caso = models.crear_caso(apellido, titulo=titulo, creado_por=actor_encargado())
+    avisar_gaduai("caso_iniciado", caso=caso["rotulo"])
     return redirect(url_for("encargado_caso", rotulo=caso["rotulo"]))
 
 
@@ -1006,13 +1007,17 @@ def tarea_recordatorios():
             models.registrar_historial(d["caso_rotulo"], actor="Sistema", accion=f"Envió un recordatorio automático a {d['email']}.")
             enviados += 1
 
-    # Aviso a GADUAI (panel de avisos + correo al encargado) cuando a un caso le queda
-    # exactamente un día para vencer — este cron corre a las 9:00 am hora Chile, así que
-    # "queda un día" se cumple corriendo una vez al día sobre fecha_limite = mañana.
-    casos_a_un_dia = models.casos_relato_a_un_dia()
-    for c in casos_a_un_dia:
-        avisar_gaduai("relato_por_vencer", caso=c["rotulo"], fechaLimite=c["fecha_limite"])
-        models.marcar_aviso_gaduai_enviado(c["rotulo"])
+    # Aviso a GADUAI (panel de avisos + correo a quien recepcionó el caso) en 3 etapas: 2
+    # días, 1 día y el mismo día del vencimiento. La hora exacta la da el horario del Cron
+    # Job (9am para 2dias/1dia, 8am para hoy) — este endpoint revisa las tres etapas en
+    # cada corrida, así que correrlo dos veces el mismo día es inofensivo.
+    casos_por_vencer = models.casos_por_vencer()
+    for c in casos_por_vencer:
+        avisar_gaduai(
+            "relato_por_vencer", caso=c["rotulo"], fechaLimite=c["fecha_limite"],
+            persona=c.get("creado_por") or "", dias=c["dias"],
+        )
+        models.marcar_aviso_gaduai_etapa(c["rotulo"], c["etapa"])
 
     dias_retencion = models.dias_retencion()
     rotulos_a_purgar = models.casos_para_purgar(dias=dias_retencion)
@@ -1024,7 +1029,7 @@ def tarea_recordatorios():
 
     return {
         "revisados": len(pendientes), "enviados": enviados,
-        "avisos_gaduai": len(casos_a_un_dia), "purgados": len(rotulos_a_purgar),
+        "avisos_gaduai": len(casos_por_vencer), "purgados": len(rotulos_a_purgar),
     }, 200
 
 

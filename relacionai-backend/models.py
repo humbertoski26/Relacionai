@@ -221,6 +221,9 @@ _MIGRATIONS = [
     ("configuracion", "dias_retencion", "INTEGER"),
     ("configuracion", "gaduai_url", "TEXT"),
     ("casos", "aviso_gaduai_enviado_en", "TEXT"),
+    # Reemplaza aviso_gaduai_enviado_en (una sola etapa) por 3 etapas: null -> '2dias' ->
+    # '1dia' -> 'hoy', nunca retrocede — permite avisar en 2 días, 1 día y el mismo día.
+    ("casos", "aviso_gaduai_etapa", "TEXT"),
 ]
 
 DIAS_RETENCION_DEFECTO = 15
@@ -628,26 +631,37 @@ def destinatarios_para_recordar(min_horas_desde_ultimo: int = 20):
     return resultado
 
 
-def casos_relato_a_un_dia():
-    """Casos abiertos cuya fecha límite es exactamente mañana y a los que aún no se les
-    avisó a GADUAI — para el aviso + correo al encargado (distinto del recordatorio al
-    destinatario externo de arriba, que usa una ventana amplia de fechas futuras)."""
-    manana = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
+ETAPAS_VENCIMIENTO_GADUAI = [(2, "2dias"), (1, "1dia"), (0, "hoy")]
+
+
+def casos_por_vencer():
+    """Casos abiertos a 2 días, 1 día o el mismo día de su fecha límite, cuya etapa
+    correspondiente todavía no se avisó a GADUAI (aviso_gaduai_etapa nunca retrocede).
+    Devuelve tuplas con la etapa/días incluidos, para armar el mensaje y el correo.
+    Distinto del recordatorio al destinatario externo (destinatarios_para_recordar), que
+    usa una ventana amplia de fechas futuras."""
+    hoy = datetime.now(timezone.utc)
+    resultado = []
     with get_conn() as conn:
-        return conn.execute(
-            """SELECT rotulo, fecha_limite FROM casos
-               WHERE estado = 'abierto'
-                 AND fecha_limite = ?
-                 AND aviso_gaduai_enviado_en IS NULL""",
-            (manana,),
-        ).fetchall()
+        for dias, etapa in ETAPAS_VENCIMIENTO_GADUAI:
+            fecha_objetivo = (hoy + timedelta(days=dias)).strftime("%Y-%m-%d")
+            filas = conn.execute(
+                """SELECT rotulo, fecha_limite, creado_por FROM casos
+                   WHERE estado = 'abierto'
+                     AND fecha_limite = ?
+                     AND (aviso_gaduai_etapa IS NULL OR aviso_gaduai_etapa != ?)""",
+                (fecha_objetivo, etapa),
+            ).fetchall()
+            for f in filas:
+                resultado.append({**dict(f), "dias": dias, "etapa": etapa})
+    return resultado
 
 
-def marcar_aviso_gaduai_enviado(rotulo: str):
+def marcar_aviso_gaduai_etapa(rotulo: str, etapa: str):
     with get_conn() as conn:
         conn.execute(
-            "UPDATE casos SET aviso_gaduai_enviado_en = ? WHERE rotulo = ?",
-            (now_iso(), rotulo),
+            "UPDATE casos SET aviso_gaduai_etapa = ? WHERE rotulo = ?",
+            (etapa, rotulo),
         )
 
 
