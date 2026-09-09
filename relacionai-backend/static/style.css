@@ -1,7 +1,11 @@
 :root{
-  /* Mismo tema oscuro navy/slate de GADUAI, siempre activo (no solo en modo oscuro
-     del sistema) — para que al entrar desde el botón de GADUAI se sienta la misma
-     plataforma, no una app aparte con su propia paleta clara. */
+  /* Tema oscuro (por defecto) — sigue el mismo tema que la persona elija en GADUAI
+     (ver data-theme en base.html, sincronizado vía ?tema= al cruzar por el botón del
+     header). --gaduai-navy/--gaduai-cyan/--accent-strong aquí son variantes CLARAS de
+     los mismos tonos de marca de GADUAI (navy #4338ca / cyan #0ea5e9), necesarias para
+     que el texto siga siendo legible sobre este fondo oscuro — el bloque
+     [data-theme="claro"] más abajo usa los hex reales de GADUAI tal cual, igual que
+     GADUAI hace consigo mismo en su propio modo claro. */
   --bg: #020617;
   --surface: #0F172A;
   --surface-sunken: #020617;
@@ -10,13 +14,13 @@
   --ink-muted: #94A3B8;
   --ink-faint: #64748B;
 
-  --accent: #8C9AE8;
-  --accent-strong: #4DD8F0;
+  --accent: #5B72D6;
+  --accent-strong: #0EA5E9;
   --accent-soft: #1E2547;
   --accent-ink: #C7CDF5;
 
-  --gaduai-navy: #8C9AE8;
-  --gaduai-cyan: #4DD8F0;
+  --gaduai-navy: #818CF8;
+  --gaduai-cyan: #22D3EE;
 
   --good: #6FBF7F; --good-soft: #1E3320;
   --warn: #D79A4B; --warn-soft: #362A16;
@@ -28,6 +32,28 @@
   --font-display: "Fraunces", ui-serif, Georgia, serif;
   --font-body: "Public Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Modo claro — mismo mecanismo que GADUAI (atributo data-theme en <html>), con los
+   hex de marca reales de GADUAI (navy #4338ca / cyan #0ea5e9), legibles aquí porque
+   el fondo ahora es claro. */
+:root[data-theme="claro"]{
+  color-scheme: light;
+  --bg: #F8FAFC;
+  --surface: #FFFFFF;
+  --surface-sunken: #F1F5F9;
+  --border: #E2E8F0;
+  --ink: #0F172A;
+  --ink-muted: #475569;
+  --ink-faint: #64748B;
+
+  --accent: #5B72D6;
+  --accent-strong: #0284C7;
+  --accent-soft: #E0E7FF;
+  --accent-ink: #3730A3;
+
+  --gaduai-navy: #4338CA;
+  --gaduai-cyan: #0891B2;
 }
 *{ box-sizing:border-box; }
 body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55; }

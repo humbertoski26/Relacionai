@@ -144,6 +144,13 @@ def inject_usuario_actual():
     }
 
 
+@app.context_processor
+def inject_tema():
+    """Tema claro/oscuro para base.html — sincronizado desde GADUAI (ver encargado_login
+    y sso_login), guardado en la sesión mientras tanto."""
+    return {"tema_actual": session.get("tema", "oscuro")}
+
+
 def link_publico(rotulo: str) -> str:
     return url_for("caso_publico", rotulo=rotulo, _external=True)
 
@@ -397,6 +404,9 @@ def home():
 
 @app.route("/encargado/login", methods=["GET", "POST"])
 def encargado_login():
+    tema_url = request.args.get("tema")
+    if tema_url in ("claro", "oscuro"):
+        session["tema"] = tema_url
     if request.method == "POST":
         email = (request.form.get("email") or "").strip()
         password = request.form.get("password") or ""
@@ -405,6 +415,10 @@ def encargado_login():
             session["usuario_id"] = usuario["id"]
             session["usuario_nombre"] = usuario["nombre"]
             session["usuario_admin"] = usuario["es_admin"]
+            if tema_url in ("claro", "oscuro"):
+                models.guardar_tema_usuario(usuario["id"], tema_url)
+            else:
+                session["tema"] = usuario["tema"]
             destino = request.args.get("next") or url_for("encargado_dashboard")
             return redirect(destino)
         flash("Correo o contraseña incorrectos, o la cuenta está desactivada.", "error")
@@ -415,7 +429,8 @@ def encargado_login():
 def sso_login():
     """Entrada sin clave para quien ya inició sesión en GADUAI como Encargado de Convivencia
     o Director — GADUAI arma este link con un token firmado de un solo uso (expira en 2
-    minutos). Si la cuenta no existe todavía en Relacionai, se crea sola."""
+    minutos), y le agrega ?tema= con el tema claro/oscuro elegido allá. Si la cuenta no existe
+    todavía en Relacionai, se crea sola."""
     payload = verificar_sso_token(request.args.get("token", ""))
     if not payload or not payload.get("correo"):
         flash("El enlace de acceso desde GADUAI expiró o no es válido — ingresa con tu correo y clave.", "error")
@@ -427,6 +442,12 @@ def sso_login():
     session["usuario_id"] = usuario["id"]
     session["usuario_nombre"] = usuario["nombre"]
     session["usuario_admin"] = usuario["es_admin"]
+    tema_url = request.args.get("tema")
+    if tema_url in ("claro", "oscuro"):
+        session["tema"] = tema_url
+        models.guardar_tema_usuario(usuario["id"], tema_url)
+    else:
+        session["tema"] = usuario["tema"]
     return redirect(url_for("encargado_dashboard"))
 
 

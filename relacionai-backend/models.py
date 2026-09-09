@@ -224,6 +224,9 @@ _MIGRATIONS = [
     # Reemplaza aviso_gaduai_enviado_en (una sola etapa) por 3 etapas: null -> '2dias' ->
     # '1dia' -> 'hoy', nunca retrocede — permite avisar en 2 días, 1 día y el mismo día.
     ("casos", "aviso_gaduai_etapa", "TEXT"),
+    # Preferencia de tema claro/oscuro, sincronizada desde GADUAI al cruzar por el
+    # botón del header — null/vacío se interpreta como 'oscuro' (mismo aspecto de hoy).
+    ("usuarios", "tema", "TEXT"),
 ]
 
 DIAS_RETENCION_DEFECTO = 15
@@ -878,6 +881,7 @@ def _fila_usuario_a_dict(fila) -> dict:
         "activo": bool(fila["activo"]),
         "creado_en": fila["creado_en"],
         "ultimo_ingreso_en": fila["ultimo_ingreso_en"],
+        "tema": fila["tema"] if "tema" in fila.keys() and fila["tema"] else "oscuro",
     }
 
 
@@ -972,6 +976,16 @@ def verificar_login(email: str, password: str):
     with get_conn() as conn:
         conn.execute("UPDATE usuarios SET ultimo_ingreso_en = ? WHERE id = ?", (now_iso(), fila["id"]))
     return _fila_usuario_a_dict(fila)
+
+
+def guardar_tema_usuario(usuario_id: int, tema: str):
+    """Persiste la preferencia de tema (claro/oscuro) de la cuenta — llamado cuando la
+    persona cruza desde GADUAI con ?tema= en la URL, para que una visita directa futura
+    (sin pasar por GADUAI) recuerde el último tema elegido allá."""
+    if tema not in ("claro", "oscuro"):
+        return
+    with get_conn() as conn:
+        conn.execute("UPDATE usuarios SET tema = ? WHERE id = ?", (tema, usuario_id))
 
 
 def cambiar_password(usuario_id: int, password_nueva: str):
