@@ -435,7 +435,7 @@ def sso_login():
     if not payload or not payload.get("correo"):
         flash("El enlace de acceso desde GADUAI expiró o no es válido — ingresa con tu correo y clave.", "error")
         return redirect(url_for("encargado_login"))
-    usuario = models.obtener_o_crear_usuario_sso(payload["correo"], payload.get("nombre") or payload["correo"])
+    usuario = models.obtener_o_crear_usuario_sso(payload["correo"], payload.get("nombre") or payload["correo"], payload.get("perfil"))
     if not usuario:
         flash("Tu cuenta de Relacionai está desactivada — contacta al administrador.", "error")
         return redirect(url_for("encargado_login"))
@@ -465,33 +465,6 @@ def encargado_logout():
 @admin_requerido
 def encargado_usuarios():
     return render_template("encargado_usuarios.html", usuarios=models.listar_usuarios())
-
-
-@app.route("/encargado/usuarios/nuevo", methods=["POST"])
-@admin_requerido
-def encargado_crear_usuario():
-    nombre = (request.form.get("nombre") or "").strip()
-    email = (request.form.get("email") or "").strip()
-    password = request.form.get("password") or ""
-    es_admin = request.form.get("es_admin") == "on"
-    if not nombre or not email:
-        flash("Completa el nombre y el correo de la nueva cuenta.", "error")
-        return redirect(url_for("encargado_usuarios"))
-    if not correo_valido(email):
-        flash("Ese correo no parece válido.", "error")
-        return redirect(url_for("encargado_usuarios"))
-    try:
-        models.crear_usuario(nombre, email, password, es_admin=es_admin)
-    except ValueError as exc:
-        mensajes = {
-            "password_muy_corta": "La contraseña debe tener al menos 6 caracteres.",
-            "email_ya_registrado": "Ya existe una cuenta con ese correo.",
-            "email_requerido": "El correo es obligatorio.",
-        }
-        flash(mensajes.get(str(exc), "No se pudo crear la cuenta."), "error")
-        return redirect(url_for("encargado_usuarios"))
-    flash(f"Cuenta creada para {nombre} ({email}).", "ok")
-    return redirect(url_for("encargado_usuarios"))
 
 
 @app.route("/encargado/usuarios/<int:usuario_id>/activar", methods=["POST"])

@@ -11,33 +11,13 @@
 
 <h1 style="font-size:22px; margin-bottom:6px;">Usuarios</h1>
 <p style="font-size:13px; color:var(--ink-muted); margin-bottom:18px;">
-  Cada persona del equipo de convivencia entra con su propia cuenta — así el historial de
-  cada caso queda a nombre de quién hizo cada acción, y puedes desactivar el acceso de
-  alguien que deja el cargo sin tener que avisarle una contraseña nueva a los demás.
+  Las cuentas se crean en el máster de GADUAI, no acá: la primera vez que una persona
+  entra a GADUAI con su perfil y cruza a Relacionai por el botón del encabezado, su
+  cuenta queda creada sola en esta lista (Director ejecutivo/máster y Director/a de
+  colegio quedan como administradores; Encargado de Convivencia como cuenta normal).
+  Desde acá puedes desactivar el acceso de alguien que deja el cargo, sin tener que
+  tocar nada en GADUAI.
 </p>
-
-<div class="card" style="padding:22px; margin-bottom:20px;">
-  <h3 style="font-size:13px;">Agregar una cuenta nueva</h3>
-  <form method="post" action="{{ url_for('encargado_crear_usuario') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-top:10px;">
-    <div class="field" style="margin-bottom:0; flex:1; min-width:180px;">
-      <label for="nombre">Nombre</label>
-      <input type="text" id="nombre" name="nombre" placeholder="Ej: Marcela Soto" required>
-    </div>
-    <div class="field" style="margin-bottom:0; flex:1; min-width:200px;">
-      <label for="email">Correo</label>
-      <input type="email" id="email" name="email" placeholder="marcela@colegio.cl" required>
-    </div>
-    <div class="field" style="margin-bottom:0; flex:1; min-width:160px;">
-      <label for="password">Contraseña inicial</label>
-      <input type="password" id="password" name="password" minlength="6" required>
-    </div>
-    <label style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--ink-muted); padding-bottom:10px;">
-      <input type="checkbox" name="es_admin"> Administrador
-    </label>
-    <button type="submit" class="btn btn-primary">Crear cuenta</button>
-  </form>
-  <div class="hint" style="margin-top:8px;">Un administrador puede crear y desactivar otras cuentas; cualquier cuenta puede cambiar su propia contraseña desde Configuración.</div>
-</div>
 
 <div class="card">
   <table class="list">

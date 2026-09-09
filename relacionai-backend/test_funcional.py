@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 # DB temporal ANTES de importar app/models
 tmpdir = tempfile.mkdtemp()
 os.environ["TASKS_SECRET"] = "secreto-test"
-os.environ["ENCARGADO_PASSWORD"] = "relacionai"
 
 sys.path.insert(0, os.path.dirname(__file__))
 import models
@@ -25,6 +24,12 @@ models.DB_PATH = __import__("pathlib").Path(tmpdir) / "test.db"
 import app as appmod
 import claude_client
 import email_client
+
+# Fase 8: las cuentas ya no se auto-crean al arrancar (antes lo hacía
+# _asegurar_usuario_inicial() con ENCARGADO_PASSWORD) — en producción la primera cuenta
+# llega sola por SSO desde GADUAI, pero este test suite necesita una cuenta de prueba
+# lista de entrada para el helper login() de más abajo.
+models.crear_usuario("Encargado de convivencia", "encargado@relacionai.local", "relacionai", es_admin=True)
 
 # ---- monkeypatch de todo lo externo ----------------------------------
 def _fake_resumir_relato(contenido):
@@ -784,29 +789,35 @@ def test_autenticacion_multiusuario():
 
         login(c)
         r = c.get("/encargado")
-        check("login: la cuenta inicial (migrada de ENCARGADO_PASSWORD) entra bien", r.status_code == 200)
+        check("login: la cuenta de prueba entra bien", r.status_code == 200)
 
-        # crear una cuenta nueva, no-admin
+        # Fase 8: las cuentas ya no se crean por formulario en Relacionai — la ruta no existe
         r = c.post("/encargado/usuarios/nuevo", data={
-            "nombre": "Marcela Soto", "email": "marcela@colegio.cl", "password": "clave123",
-        }, follow_redirects=True)
-        check("usuarios: cuenta nueva creada", any(u["email"] == "marcela@colegio.cl" for u in models.listar_usuarios()))
-        nueva = [u for u in models.listar_usuarios() if u["email"] == "marcela@colegio.cl"][0]
-        check("usuarios: cuenta nueva no es admin por defecto", nueva["es_admin"] is False)
+            "nombre": "Quien sea", "email": "quiensea@colegio.cl", "password": "clave123",
+        })
+        check("usuarios: la ruta de creación manual ya no existe", r.status_code == 404)
 
-        # contraseña muy corta rechazada
-        r = c.post("/encargado/usuarios/nuevo", data={
-            "nombre": "Corta", "email": "corta@colegio.cl", "password": "123",
-        }, follow_redirects=True)
-        check("usuarios: contraseña muy corta rechazada", not any(u["email"] == "corta@colegio.cl" for u in models.listar_usuarios()))
+    # Fase 8: provisión de cuentas por SSO desde GADUAI — el perfil de GADUAI decide es_admin
+    # (Director ejecutivo/máster y Director/a de colegio administran; Encargado no), y se
+    # sincroniza en cada cruce posterior, no solo al crearse la cuenta.
+    nueva_encargado = models.obtener_o_crear_usuario_sso("nueva@colegio.cl", "Nueva Persona", "Encargado de Convivencia Educativa")
+    check("sso: cuenta nueva de Encargado de Convivencia no es admin", nueva_encargado["es_admin"] is False)
 
-        # correo duplicado rechazado
-        r = c.post("/encargado/usuarios/nuevo", data={
-            "nombre": "Otra Marcela", "email": "marcela@colegio.cl", "password": "clave456",
-        }, follow_redirects=True)
-        check("usuarios: correo duplicado rechazado", b"Ya existe una cuenta" in r.data)
+    nuevo_director = models.obtener_o_crear_usuario_sso("director@colegio.cl", "Director Nuevo", "Director/a de colegio")
+    check("sso: cuenta nueva de Director/a de colegio es admin", nuevo_director["es_admin"] is True)
 
-    # la cuenta nueva puede entrar con su propia contraseña, y sus acciones quedan a su nombre
+    nuevo_master = models.obtener_o_crear_usuario_sso("master@colegio.cl", "Master Nuevo", "Director ejecutivo/máster")
+    check("sso: cuenta nueva de Director ejecutivo/máster es admin", nuevo_master["es_admin"] is True)
+
+    ascendida = models.obtener_o_crear_usuario_sso("nueva@colegio.cl", "Nueva Persona", "Director/a de colegio")
+    check("sso: es_admin se sincroniza si el perfil cambia en un cruce posterior", ascendida["es_admin"] is True)
+
+    # A partir de acá el resto del test (historial, cambio de password propio, activar/
+    # desactivar) no depende de cómo se creó la cuenta — se sigue usando models.crear_usuario
+    # directo como fixture, igual que antes de la Fase 8.
+    models.crear_usuario("Marcela Soto", "marcela@colegio.cl", "clave123", es_admin=False)
+
+    # sus acciones quedan a su nombre
     with app.test_client() as c2:
         r = c2.post("/encargado/login", data={"email": "marcela@colegio.cl", "password": "clave123"}, follow_redirects=True)
         check("usuarios: la cuenta nueva puede iniciar sesión", r.status_code == 200 and b"Cerrar sesi" in r.data)

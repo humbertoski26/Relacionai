@@ -151,7 +151,7 @@
   <h3 style="font-size:13px;">Mi cuenta</h3>
   <p style="font-size:12.5px; color:var(--ink-muted); margin-bottom:12px;">
     Sesión iniciada como <strong>{{ usuario_actual_nombre }}</strong>{{ ' (administrador)' if usuario_actual_admin else '' }}.
-    {% if usuario_actual_admin %}Para crear o desactivar cuentas de otras personas del equipo, ve a <a href="{{ url_for('encargado_usuarios') }}">Usuarios</a>.{% endif %}
+    {% if usuario_actual_admin %}Para ver quién tiene cuenta o desactivar el acceso de alguien, ve a <a href="{{ url_for('encargado_usuarios') }}">Usuarios</a> — las cuentas nuevas se crean en GADUAI.{% endif %}
   </p>
   <form method="post" action="{{ url_for('encargado_cambiar_password') }}" style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
     <div class="field" style="margin-bottom:0; flex:1; min-width:180px;">

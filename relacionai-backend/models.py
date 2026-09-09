@@ -282,7 +282,6 @@ def init_db():
             conn.execute("INSERT INTO configuracion (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
         else:
             conn.execute("INSERT OR IGNORE INTO configuracion (id) VALUES (1)")
-    _asegurar_usuario_inicial()
 
 
 def _slug_apellido(apellido: str) -> str:
@@ -857,21 +856,6 @@ def purgar_caso(rotulo: str, dias: int = None):
 
 # --------------------------------------------------------------- usuarios (autenticación)
 #
-# Antes había una sola contraseña compartida (variable de entorno ENCARGADO_PASSWORD)
-# para todo el equipo de convivencia escolar — cómodo para partir, pero no permite saber
-# qué persona hizo cada acción (el historial usaba el nombre escrito a mano en
-# "Datos del encargado" como aproximación) ni desactivar el acceso de alguien que deja
-# el cargo sin cambiarle la contraseña a todos los demás.
-#
-# _asegurar_usuario_inicial() migra sola la primera vez: si todavía no hay ningún
-# usuario, crea uno con la contraseña que ya se usaba (ENCARGADO_PASSWORD, o "relacionai"
-# si no se configuró nada) para que el equipo pueda seguir entrando exactamente igual que
-# antes y crear las demás cuentas ya logueado, en vez de quedar bloqueados por la
-# migración.
-
-ENCARGADO_PASSWORD_LEGADO = os.environ.get("ENCARGADO_PASSWORD", "relacionai")
-
-
 def _fila_usuario_a_dict(fila) -> dict:
     return {
         "id": fila["id"],
@@ -883,27 +867,6 @@ def _fila_usuario_a_dict(fila) -> dict:
         "ultimo_ingreso_en": fila["ultimo_ingreso_en"],
         "tema": fila["tema"] if "tema" in fila.keys() and fila["tema"] else "oscuro",
     }
-
-
-def hay_usuarios() -> bool:
-    with get_conn() as conn:
-        fila = conn.execute("SELECT COUNT(*) AS n FROM usuarios").fetchone()
-        return bool(fila and fila["n"])
-
-
-def _asegurar_usuario_inicial():
-    """Se llama al iniciar la app (init_db). No hace nada si ya existe algún usuario."""
-    if hay_usuarios():
-        return
-    config = obtener_configuracion()
-    nombre = (config["nombre_encargado"] if config else None) or "Encargado de convivencia"
-    email = (config["correo_encargado"] if config else None) or "encargado@relacionai.local"
-    try:
-        crear_usuario(nombre, email, ENCARGADO_PASSWORD_LEGADO, es_admin=True)
-    except ValueError:
-        # email raro que ya existía por alguna razón — no debería pasar en una base nueva,
-        # pero si pasa, igual dejamos un admin utilizable con un correo de respaldo.
-        crear_usuario(nombre, "encargado@relacionai.local", ENCARGADO_PASSWORD_LEGADO, es_admin=True)
 
 
 def crear_usuario(nombre: str, email: str, password: str, es_admin: bool = False) -> dict:
@@ -948,16 +911,31 @@ def obtener_usuario_por_email(email: str):
     return _fila_usuario_a_dict(fila) if fila else None
 
 
-def obtener_o_crear_usuario_sso(email: str, nombre: str):
+# Mismos strings exactos que usa GADUAI para estos dos perfiles (triage-backend/server.js) —
+# viajan intactos en el token SSO, así que no hace falta que GADUAI mande nada adicional.
+PERFIL_MASTER_GADUAI = "Director ejecutivo/máster"
+PERFIL_DIRECTOR_GADUAI = "Director/a de colegio"
+
+
+def obtener_o_crear_usuario_sso(email: str, nombre: str, perfil: str = None):
     """Usado por el acceso sin clave desde GADUAI (SSO): si la cuenta todavía no existe en
     Relacionai, la crea con una contraseña aleatoria (que la persona puede cambiar después en
-    Configuración si alguna vez quiere entrar directo, sin pasar por GADUAI)."""
+    Configuración si alguna vez quiere entrar directo, sin pasar por GADUAI). Los perfiles de
+    GADUAI que administran (Director ejecutivo/máster, Director/a de colegio) entran también
+    como administradores en Relacionai — Encargado de Convivencia entra como cuenta normal.
+    Las cuentas ya existentes se sincronizan en cada cruce, no solo al crearse, para que un
+    cambio de perfil hecho en GADUAI se refleje acá sin tocar nada de este lado."""
+    es_admin = perfil in (PERFIL_MASTER_GADUAI, PERFIL_DIRECTOR_GADUAI)
     existente = obtener_usuario_por_email(email)
     if existente:
         if not existente["activo"]:
             return None
+        if perfil is not None and bool(existente["es_admin"]) != es_admin:
+            with get_conn() as conn:
+                conn.execute("UPDATE usuarios SET es_admin = ? WHERE id = ?", (1 if es_admin else 0, existente["id"]))
+            existente = dict(existente, es_admin=es_admin)
         return existente
-    return crear_usuario(nombre, email, secrets.token_urlsafe(12), es_admin=False)
+    return crear_usuario(nombre, email, secrets.token_urlsafe(12), es_admin=es_admin)
 
 
 def verificar_login(email: str, password: str):

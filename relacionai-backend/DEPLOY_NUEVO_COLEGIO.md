@@ -24,9 +24,10 @@ otro despliegue):
 
 - `SECRET_KEY`: genera una nueva y al azar (por ejemplo
   `python3 -c "import secrets; print(secrets.token_hex(32))"`).
-- `ENCARGADO_PASSWORD`: una contraseña temporal cualquiera — solo se usa una
-  vez, para crear la primera cuenta del colegio (ver paso 4). Después de esa
-  primera vez ya no importa cuál sea.
+- `SSO_SHARED_SECRET`: el mismo valor que tiene GADUAI para este colegio —
+  es lo que permite que las cuentas se creen solas al cruzar desde ahí (ver
+  paso 4). Sin esto configurado en ambos lados, nadie puede entrar a
+  Relacionai — no hay contraseña temporal de respaldo.
 - `ANTHROPIC_API_KEY`: si cada colegio se factura o se mide por separado,
   usa una API key distinta por colegio; si no importa, puedes reutilizar la
   misma en todos.
@@ -57,19 +58,27 @@ distinto.
 
 ## 4. Primer ingreso y datos del colegio
 
-1. Entra a `https://<dominio-del-colegio-nuevo>/encargado/login` con el
-   correo `encargado@relacionai.local` (o el que ya estuviera en "Datos del
-   encargado" — normalmente ninguno todavía, en un despliegue nuevo) y la
-   contraseña que pusiste en `ENCARGADO_PASSWORD`.
-2. Completa el asistente en `/encargado/configuracion`: datos del encargado
+Las cuentas de Relacionai ya no se crean acá — se crean en el máster de
+GADUAI de ese colegio y llegan solas la primera vez que cada persona cruza
+por el botón "Relacionai" del encabezado (SSO). No hay contraseña temporal
+ni formulario de "crear cuenta" en Relacionai.
+
+1. En GADUAI, pega la URL de este despliegue en `relacionai_url` del colegio
+   (panel de administrador de GADUAI) y confirma que `SSO_SHARED_SECRET` es
+   el mismo valor en ambos servicios.
+2. Entra a GADUAI como Director ejecutivo/máster de ese colegio (la cuenta
+   ya existe: se crea sola al crear el colegio en GADUAI) y cruza a
+   Relacionai con el botón del encabezado — esa primera cuenta queda creada
+   en Relacionai automáticamente, ya como administrador.
+3. Completa el asistente en `/encargado/configuracion`: datos del encargado
    (nombre, cargo, correo — el correo es donde llega el respaldo del informe
    de cada caso), **nombre del colegio** (aparece en el informe, en cada
    relato descargado y en el asunto de los correos), reglamento interno
    (opcional) e insignia del colegio (opcional).
-3. Ve a `/encargado/usuarios` y crea una cuenta con el correo y nombre reales
-   de cada persona del equipo de convivencia de ese colegio — no dejes a
-   todos usando la cuenta que se creó automáticamente con
-   `ENCARGADO_PASSWORD`, es solo el punto de partida.
+4. El resto del equipo de convivencia (Encargado de Convivencia, Director/a
+   de colegio) obtiene su propia cuenta en Relacionai la primera vez que
+   entra a GADUAI con su perfil y cruza por el mismo botón — no hace falta
+   crear nada a mano.
 
 ## 5. Verificación rápida antes de entregárselo al colegio
 

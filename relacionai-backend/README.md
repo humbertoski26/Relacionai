@@ -143,7 +143,7 @@ python3 test_funcional.py
 | Variable | Para qué sirve |
 |---|---|
 | `SECRET_KEY` | Firma la sesión del encargado. Genera una propia y no la compartas. |
-| `ENCARGADO_PASSWORD` | Solo se usa **una vez**, al arrancar por primera vez sin ningún usuario todavía creado: se crea automáticamente una cuenta con esta contraseña (correo: el que esté en "Datos del encargado", o `encargado@relacionai.local` si aún no se ha configurado ninguno). De ahí en adelante, los accesos son por cuenta individual — ver "Usuarios" más abajo. |
+| `SSO_SHARED_SECRET` | Mismo valor que tiene GADUAI para este colegio. Las cuentas de Relacionai se crean solas al cruzar desde GADUAI por SSO — sin esta variable (en ambos lados) nadie puede entrar. Ver "Usuarios" más abajo. |
 | `DATABASE_URL` | Opcional. Si se define (por ejemplo al agregar una base de datos Postgres en Render), la app usa Postgres en vez de SQLite — ver "Pasar a Postgres" más abajo. Sin esta variable, sigue usando el archivo SQLite de siempre. |
 | `REDIS_URL` | Opcional. Si se define (por ejemplo al agregar un Key Value/Redis en Render), el análisis con Claude y el envío de correos se procesan en una cola de tareas real (RQ, con un proceso worker aparte — ver `worker.py`) en vez de en un hilo del proceso web. Sin esta variable, sigue usando hilos igual que antes. |
 | `ANTHROPIC_API_KEY` | **Necesaria** para que Claude genere los resúmenes y la síntesis. Se obtiene en [console.anthropic.com](https://console.anthropic.com) — es distinta de tu cuenta de claude.ai. Sin ella, la plataforma funciona igual (recibe relatos, arma el historial, genera el informe) pero la síntesis queda marcada como "pendiente de configuración". |
@@ -154,15 +154,18 @@ python3 test_funcional.py
 
 ### Usuarios (cuentas del equipo de convivencia)
 
-Cada persona entra con su propia cuenta (correo + contraseña) en vez de una
-contraseña compartida. La primera vez que se arranca la app sin ningún
-usuario creado todavía, se crea sola una cuenta administradora con la
-contraseña de `ENCARGADO_PASSWORD` — de ahí en adelante, esa cuenta (desde
-`/encargado/usuarios`) puede crear cuentas nuevas para el resto del equipo y
-desactivar el acceso de alguien que deja el cargo, sin tener que avisarle una
-contraseña nueva a los demás. Cualquier cuenta puede cambiar su propia
-contraseña desde `/encargado/configuracion`. El historial de cada caso queda
-a nombre de la cuenta que hizo la acción.
+Cada persona entra con su propia cuenta (correo + contraseña interna, sin
+que la persona la conozca) en vez de una contraseña compartida — pero las
+cuentas **no se crean acá**: se crean en el máster de GADUAI de ese colegio,
+y llegan solas a Relacionai la primera vez que esa persona cruza por el
+botón "Relacionai" del encabezado (SSO, ver `SSO_SHARED_SECRET` arriba).
+Director ejecutivo/máster y Director/a de colegio quedan como
+administradores en Relacionai; Encargado de Convivencia Educativa como
+cuenta normal. Desde `/encargado/usuarios` un administrador puede ver el
+listado y desactivar el acceso de alguien que deja el cargo, pero no crear
+cuentas nuevas ahí. Cualquier cuenta puede cambiar su propia contraseña
+desde `/encargado/configuracion`. El historial de cada caso queda a nombre
+de la cuenta que hizo la acción.
 
 ### Pasar a Postgres
 
@@ -240,10 +243,10 @@ configurar nada aparte.
   Alternativa más simple si por ahora prefieres seguir con SQLite: un plan de
   Render con "Persistent Disk" montado en `data/`. Sin uno de los dos, un
   simple redeploy podría borrar la información del colegio sin aviso.
-- Cambia `SECRET_KEY` y `ENCARGADO_PASSWORD` por valores propios — los que
-  vienen en `.env.example` son solo para desarrollo (`ENCARGADO_PASSWORD` solo
-  se usa una vez, para crear la primera cuenta — ver "Usuarios" arriba). Si
-  vendes esto a varios colegios, cada uno necesita su **propio despliegue**
+- Cambia `SECRET_KEY` por un valor propio, y define `SSO_SHARED_SECRET` con
+  el mismo valor que tiene GADUAI para ese colegio (ver "Usuarios" arriba —
+  sin esto no se puede crear ninguna cuenta). Si vendes esto a varios
+  colegios, cada uno necesita su **propio despliegue**
   (su propia base de datos y sus propias cuentas) — sigue siendo un colegio
   por despliegue, no multi-tenant; ver `DEPLOY_NUEVO_COLEGIO.md` para el
   procedimiento paso a paso de levantar un colegio nuevo.
@@ -364,13 +367,12 @@ paso de infraestructura que implica:
   reviso apenas tengas esa base disponible.
 - **Autenticación real por encargado** (`models.py` / `app.py`): cuentas
   individuales (nombre, correo, contraseña) en vez de una sola contraseña
-  compartida. Un administrador crea y desactiva cuentas desde
-  `/encargado/usuarios`; cualquier cuenta puede cambiar su propia contraseña
-  desde Configuración. El historial de cada caso ahora queda a nombre de
-  quién hizo la acción de verdad. La migración es automática: al arrancar por
-  primera vez con este cambio, se crea una cuenta con el correo y la
-  contraseña que ya se estaban usando (`ENCARGADO_PASSWORD`), para que el
-  equipo pueda seguir entrando igual y crear las demás cuentas ya adentro.
+  compartida. Las cuentas se crean en el máster de GADUAI y llegan solas a
+  Relacionai al cruzar por SSO (ver "Usuarios" arriba); un administrador
+  puede ver el listado y desactivar cuentas desde `/encargado/usuarios`,
+  y cualquier cuenta puede cambiar su propia contraseña desde Configuración.
+  El historial de cada caso queda a nombre de quién hizo la acción de
+  verdad.
 - **Cola de tareas real** (`tasks.py`, `worker.py`): si se define
   `REDIS_URL`, el análisis con Claude, el envío de correos y la lectura del
   reglamento se encolan en una cola real (RQ) que corre en un proceso worker
