@@ -162,9 +162,20 @@ app.jinja_env.filters["fecha"] = fmt_fecha
 def inject_config_global():
     """Disponible en todas las plantillas (incluidas las públicas) — usado por base.html
     para mostrar la insignia del colegio en el encabezado de cada página, sin que cada
-    vista tenga que pasarla a mano."""
+    vista tenga que pasarla a mano.
+
+    El link "Volver a GADUAI" del topnav depende de config_global['gaduai_url'], que hoy
+    solo se llena a mano desde Configuración — si nadie lo completó, el botón de regreso
+    desaparece y la persona queda sin cómo volver. GADUAI_URL (variable de entorno) es un
+    respaldo fijo para este despliegue de un solo colegio: se usa solo si el campo de la
+    base de datos está vacío, así la persona que sí lo configuró a mano sigue mandando."""
     try:
-        return {"config_global": models.obtener_configuracion()}
+        config = models.obtener_configuracion()
+        if config is not None:
+            config = dict(config)
+            if not config.get("gaduai_url"):
+                config["gaduai_url"] = os.environ.get("GADUAI_URL") or None
+        return {"config_global": config}
     except Exception:
         return {"config_global": None}
 

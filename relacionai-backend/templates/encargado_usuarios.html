@@ -3,7 +3,7 @@
 {% block topnav %}
 <div class="topnav">
   <a href="{{ url_for('encargado_configuracion') }}">← Configuración</a>
-  {% if config_global and config_global['gaduai_url'] %}<a class="btn-icon" href="{{ config_global['gaduai_url'] }}" target="_blank" rel="noopener" title="Ir a GADUAI" aria-label="Ir a GADUAI">⇱</a>{% endif %}
+  {% if config_global and config_global['gaduai_url'] %}<a class="btn-framed" href="{{ config_global['gaduai_url'] }}" title="Volver a GADUAI">⇱ Volver a GADUAI</a>{% endif %}
 </div>
 {% endblock %}
 {% block content %}
