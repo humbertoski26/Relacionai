@@ -291,8 +291,13 @@ def _slug_apellido(apellido: str) -> str:
     return norm[:20] or "CASO"
 
 
-def _random_suffix(n=4):
-    return "".join(random.choices(string.ascii_uppercase + string.digits, k=n))
+def _random_suffix(n=10):
+    # Auditoría de seguridad: el rótulo (parte del link público del caso) usaba random.choices
+    # (no apto para tokens de seguridad, predecible) con solo 4 caracteres — combinado con un
+    # apellido no secreto, era adivinable por fuerza bruta en un tiempo razonable. secrets usa
+    # el generador aleatorio del sistema operativo (criptográficamente seguro) y 10 caracteres
+    # de este alfabeto (36^10 ≈ 3,6×10^15 combinaciones) lo vuelve impráctico de adivinar.
+    return "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(n))
 
 
 def crear_caso(apellido: str, titulo: str = "", creado_por: str = "encargado"):

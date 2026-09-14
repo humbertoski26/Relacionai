@@ -76,9 +76,44 @@ def verificar_sso_token(token: str):
 def correo_valido(email: str) -> bool:
     return bool(EMAIL_RE.match((email or "").strip()))
 
+
+# Auditoría de seguridad: límite simple de intentos por IP en rutas sensibles a fuerza bruta
+# (login del encargado, y adivinar el rótulo de un caso en el link público). En memoria del
+# proceso — basta para un solo worker/instancia; se resetea solo cada 15 minutos por IP.
+_intentos = {}
+
+
+def limite_intentos(clave_ruta, tope=20, ventana_seg=900):
+    def decorador(vista):
+        @functools.wraps(vista)
+        def envoltura(*args, **kwargs):
+            ip = request.headers.get("X-Forwarded-For", request.remote_addr or "desconocida").split(",")[0].strip()
+            k = (clave_ruta, ip)
+            ahora = time.time()
+            n, desde = _intentos.get(k, (0, ahora))
+            if ahora - desde > ventana_seg:
+                n, desde = 0, ahora
+            n += 1
+            _intentos[k] = (n, desde)
+            if n > tope:
+                abort(429)
+            return vista(*args, **kwargs)
+        return envoltura
+    return decorador
+
 app = Flask(__name__)
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
-app.secret_key = os.environ.get("SECRET_KEY", "cambia-esta-clave-en-produccion")
+# Auditoría de seguridad: antes caía a una clave fija ("cambia-esta-clave-en-produccion")
+# escrita en el propio código si SECRET_KEY no estaba configurada — con esa clave conocida
+# (pública, está en el repo) cualquiera podía firmar una cookie de sesión falsa y entrar como
+# cualquier usuario. Ahora, igual que DATABASE_URL/ADMIN_SETUP_KEY en los otros backends de
+# GADUAI, el proceso no arranca si falta.
+if not os.environ.get("SECRET_KEY"):
+    raise RuntimeError("Falta la variable de entorno SECRET_KEY")
+app.secret_key = os.environ["SECRET_KEY"]
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB por archivo subido — a propósito
 # bajo: el servidor gratuito tiene poca memoria, y un archivo muy pesado (sobre todo un PDF
 # escaneado como fotos de cada página) puede hacer que el proceso se caiga por completo
@@ -403,6 +438,7 @@ def home():
 # --- login del encargado ---------------------------------------------
 
 @app.route("/encargado/login", methods=["GET", "POST"])
+@limite_intentos("encargado_login")
 def encargado_login():
     tema_url = request.args.get("tema")
     if tema_url in ("claro", "oscuro"):
@@ -917,6 +953,7 @@ def encargado_descargar_relato(rotulo, relato_id):
 # --- página pública para subir un relato -------------------------------
 
 @app.route("/caso/<rotulo>", methods=["GET"])
+@limite_intentos("caso_publico", tope=60)
 def caso_publico(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
@@ -927,6 +964,7 @@ def caso_publico(rotulo):
 
 
 @app.route("/caso/<rotulo>", methods=["POST"])
+@limite_intentos("caso_publico_enviar", tope=30)
 def caso_publico_enviar(rotulo):
     caso = models.obtener_caso(rotulo)
     if not caso:
