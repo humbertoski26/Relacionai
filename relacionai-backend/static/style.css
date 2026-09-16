@@ -1,11 +1,11 @@
 :root{
   /* Tema oscuro (por defecto) — sigue el mismo tema que la persona elija en GADUAI
      (ver data-theme en base.html, sincronizado vía ?tema= al cruzar por el botón del
-     header). --gaduai-navy/--gaduai-cyan/--accent-strong aquí son variantes CLARAS de
-     los mismos tonos de marca de GADUAI (navy #4338ca / cyan #0ea5e9), necesarias para
-     que el texto siga siendo legible sobre este fondo oscuro — el bloque
-     [data-theme="claro"] más abajo usa los hex reales de GADUAI tal cual, igual que
-     GADUAI hace consigo mismo en su propio modo claro. */
+     header). Paleta Inteligencia Educativa (oficial GADUAI): azul marino #0C0B70,
+     azul intenso #0034DA, turquesa IA #20C9B5, violeta #8B5CF6. Acá usamos variantes
+     CLARAS de esos tonos para que el texto siga siendo legible sobre este fondo
+     oscuro — el bloque [data-theme="claro"] más abajo usa los hex reales de GADUAI
+     tal cual, igual que GADUAI hace consigo mismo en su propio modo claro. */
   --bg: #020617;
   --surface: #0F172A;
   --surface-sunken: #020617;
@@ -14,13 +14,13 @@
   --ink-muted: #94A3B8;
   --ink-faint: #64748B;
 
-  --accent: #5B72D6;
-  --accent-strong: #0EA5E9;
-  --accent-soft: #1E2547;
-  --accent-ink: #C7CDF5;
+  --accent: #7C8AFF;
+  --accent-strong: #20C9B5;
+  --accent-soft: #141A4D;
+  --accent-ink: #C7D2FE;
 
-  --gaduai-navy: #818CF8;
-  --gaduai-cyan: #22D3EE;
+  --gaduai-navy: #7C8AFF;
+  --gaduai-cyan: #20C9B5;
 
   --good: #6FBF7F; --good-soft: #1E3320;
   --warn: #D79A4B; --warn-soft: #362A16;
@@ -35,8 +35,10 @@
 }
 
 /* Modo claro — mismo mecanismo que GADUAI (atributo data-theme en <html>), con los
-   hex de marca reales de GADUAI (navy #4338ca / cyan #0ea5e9), legibles aquí porque
-   el fondo ahora es claro. */
+   hex reales de la Paleta Inteligencia Educativa. --gaduai-cyan usa una turquesa más
+   oscura que la turquesa IA oficial (#20C9B5): esa turquesa por sí sola no pasa
+   contraste como texto chico sobre blanco (~1.7:1, bajo el 4.5:1 exigible), así que
+   acá se usa una variante oscurecida que conserva el mismo tono pero sí se lee bien. */
 :root[data-theme="claro"]{
   color-scheme: light;
   --bg: #F8FAFC;
@@ -47,13 +49,13 @@
   --ink-muted: #475569;
   --ink-faint: #64748B;
 
-  --accent: #5B72D6;
-  --accent-strong: #0284C7;
-  --accent-soft: #E0E7FF;
-  --accent-ink: #3730A3;
+  --accent: #0034DA;
+  --accent-strong: #0034DA;
+  --accent-soft: #E6EAFF;
+  --accent-ink: #0C0B70;
 
-  --gaduai-navy: #4338CA;
-  --gaduai-cyan: #0891B2;
+  --gaduai-navy: #0C0B70;
+  --gaduai-cyan: #0C8F7E;
 }
 *{ box-sizing:border-box; }
 body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55; }
