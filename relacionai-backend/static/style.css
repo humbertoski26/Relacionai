@@ -66,6 +66,10 @@ a{ color:var(--accent-strong); }
 .app{ max-width:1080px; margin:0 auto; padding:28px 24px 64px; }
 .app.narrow{ max-width:520px; }
 
+/* Franja de marca GADUAI: mismo degradado navy→azul intenso→turquesa IA que usa el propio
+   GADUAI en su encabezado — fija (no cambia con el tema), igual que allá, para que se note
+   de un vistazo que Relacionai es del mismo producto. */
+body::before{ content:""; display:block; height:4px; background:linear-gradient(90deg,#0C0B70,#0034DA,#20C9B5); }
 .topbar{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; padding-bottom:20px; margin-bottom:24px; border-bottom:1px solid var(--border); }
 .brand{ display:flex; align-items:baseline; gap:10px; text-decoration:none; }
 .brand .mark{ font-family:var(--font-display); font-weight:600; font-size:24px; color:var(--gaduai-navy); }
@@ -103,8 +107,10 @@ input[type="number"], input[type="date"], input[type="time"], input[type="tel"],
 textarea{ min-height:180px; resize:vertical; line-height:1.6; }
 
 .btn{ border:none; border-radius:8px; padding:11px 18px; font-weight:700; font-size:13.5px; cursor:pointer; display:inline-flex; align-items:center; gap:8px; text-decoration:none; }
-.btn-primary{ background:var(--accent); color:#fff; }
-.btn-primary:hover{ background:var(--accent-strong); }
+/* Mismo degradado que la franja de marca y que el botón principal de GADUAI
+   ("Resolver con GADUAI") — el CTA más importante de cada producto se ve igual. */
+.btn-primary{ background:linear-gradient(90deg,#0034DA,#20C9B5); color:#fff; }
+.btn-primary:hover{ background:linear-gradient(90deg,#0028ad,#1ab39f); }
 .btn-ghost{ background:transparent; color:var(--accent-strong); border:1px solid var(--border); }
 .btn-ghost:hover{ background:var(--accent-soft); }
 .btn-wa{ background:#25D366; color:#06301c; }
