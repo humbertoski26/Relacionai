@@ -22,9 +22,14 @@
   --gaduai-navy: #7C8AFF;
   --gaduai-cyan: #20C9B5;
 
-  --good: #6FBF7F; --good-soft: #1E3320;
-  --warn: #D79A4B; --warn-soft: #362A16;
-  --danger: #E08379; --danger-soft: #3A211D;
+  /* Antes rojo/ámbar/VERDE genéricos de semáforo — se alinean a los 4 colores reales del
+     Triage de GADUAI (Rojo/Naranjo/Azul/Gris), así "urgencia" se ve y significa lo mismo en
+     los dos productos. good (antes verde) pasa a ser el Azul de GADUAI — el caso con más
+     margen no es "todo bien" (verde), es "importante pero no urgente todavía", que es
+     exactamente lo que el Azul de GADUAI ya representa. */
+  --good: #0284C7; --good-soft: #0F2A3D;
+  --warn: #D97706; --warn-soft: #3D2A0A;
+  --danger: #E11D48; --danger-soft: #3A0F1C;
 
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
   --radius: 10px;
