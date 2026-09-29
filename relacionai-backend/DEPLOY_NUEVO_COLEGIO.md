@@ -5,6 +5,13 @@ servicio web, su propia base de datos y sus propias cuentas — no comparten
 nada entre sí. Vender a un colegio nuevo significa repetir este
 procedimiento, no tocar el código.
 
+**Relacionai es parte de GADUAI en cada colegio que se abre:** este
+procedimiento se hace siempre junto con el alta del colegio en GADUAI (en el
+GADUAI compartido `triage-gaduai`, o en uno dedicado). Antes de empezar,
+anota el **id del colegio en GADUAI** (lo que va después de `?colegio=` en su
+link, por ejemplo `colegio-evolucion`; en un GADUAI dedicado es su
+`DEFAULT_COLEGIO_ID`).
+
 Tiempo estimado: 20-30 minutos la primera vez, menos de 10 con práctica.
 
 ## 1. Repite el servicio web en Render
@@ -17,7 +24,21 @@ Tiempo estimado: 20-30 minutos la primera vez, menos de 10 con práctica.
    `relacionai-<nombre-colegio>` — así se distingue de un vistazo en el
    dashboard de Render, que va a tener uno por cada colegio.
 
-## 2. Variables de entorno — cada colegio necesita las suyas, no copiarlas de otro
+## 2. Base de datos y variables de entorno — cada colegio necesita las suyas
+
+Primero crea en Render una **base Postgres nueva** para este colegio
+(`relacionai-<nombre-colegio>-db`) y copia su **Internal Database URL** en la
+variable `DATABASE_URL` del servicio. Es obligatoria: en Render, Relacionai
+no arranca sin ella (el archivo local se borra en cada despliegue).
+
+Estas conectan este Relacionai con su colegio en GADUAI:
+
+- `GADUAI_COLEGIO_ID`: el id del colegio en GADUAI (ver arriba). Obligatoria:
+  sin ella nadie puede entrar sin clave desde GADUAI, y con ella Relacionai
+  rechaza accesos de cualquier otro colegio y le dice a GADUAI a qué colegio
+  van sus relatos y avisos.
+- `GADUAI_ADMIN_KEY`: la misma llave de administración de GADUAI
+  (`ADMIN_SETUP_KEY`) que usan todos los Relacionai.
 
 Estas **tienen que ser distintas para cada colegio** (nunca reutilices las de
 otro despliegue):
@@ -56,6 +77,13 @@ Cada colegio necesita su propio Cron Job de Render apuntando a
 sirve un solo Cron Job para todos, porque cada uno le pega a un dominio
 distinto.
 
+## 3b. Respaldos
+
+En la tarea de respaldos `gaduai-respaldos` agrega la variable
+`RESPALDO_DB_RELACIONAI_<NOMBRE_COLEGIO>` con la Internal Database URL de la
+base nueva, y corre la tarea una vez (Trigger Run) para confirmar "N de N
+bases OK".
+
 ## 4. Primer ingreso y datos del colegio
 
 Las cuentas de Relacionai ya no se crean acá — se crean en el máster de
@@ -74,7 +102,9 @@ ni formulario de "crear cuenta" en Relacionai.
    (nombre, cargo, correo — el correo es donde llega el respaldo del informe
    de cada caso), **nombre del colegio** (aparece en el informe, en cada
    relato descargado y en el asunto de los correos), reglamento interno
-   (opcional) e insignia del colegio (opcional).
+   (opcional), insignia del colegio (opcional) y **Link a GADUAI** (el link
+   con que ese colegio entra a GADUAI). Cada sección tiene su propio botón
+   Guardar.
 4. El resto del equipo de convivencia (Encargado de Convivencia, Director/a
    de colegio) obtiene su propia cuenta en Relacionai la primera vez que
    entra a GADUAI con su perfil y cruza por el mismo botón — no hace falta

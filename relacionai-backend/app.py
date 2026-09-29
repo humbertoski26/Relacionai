@@ -52,11 +52,22 @@ MAX_RELATOS_POR_PERSONA = 2  # por caso — al llegar al tope, el link queda des
 SSO_SHARED_SECRET = os.environ.get("SSO_SHARED_SECRET")
 
 
+def colegio_gaduai():
+    """Id del colegio de GADUAI al que pertenece este Relacionai (env GADUAI_COLEGIO_ID, el
+    mismo id que va en ?colegio= de GADUAI). Cada Relacionai atiende a un solo colegio: con
+    este dato rechaza accesos sin clave de otros colegios y le dice a GADUAI a qué colegio van
+    sus relatos y avisos (obligatorio en el GADUAI compartido por varios colegios)."""
+    return (os.environ.get("GADUAI_COLEGIO_ID") or "").strip() or None
+
+
+_sso_usados = {}  # firma -> vencimiento (ms): cada link de acceso sirve una sola vez
+
+
 def verificar_sso_token(token: str):
-    """Valida el token de acceso sin clave que GADUAI arma para Encargado de Convivencia y
-    Director al hacer login ahí — mismo secreto compartido (SSO_SHARED_SECRET) en ambos lados,
-    firmado con HMAC-SHA256. Devuelve el payload (correo, nombre, perfil) si es válido y no
-    expiró (2 minutos), None en cualquier otro caso."""
+    """Valida el token de acceso sin clave que GADUAI arma al cruzar a Relacionai — mismo
+    secreto compartido (SSO_SHARED_SECRET) en ambos lados, firmado con HMAC-SHA256. Devuelve
+    el payload (correo, nombre, perfil, colegioId) si es válido, no expiró (2 minutos), no se
+    usó antes y viene del colegio de este Relacionai; None en cualquier otro caso."""
     if not SSO_SHARED_SECRET or not token or "." not in token:
         return None
     b64, firma = token.split(".", 1)
@@ -68,8 +79,25 @@ def verificar_sso_token(token: str):
         payload = json.loads(base64.urlsafe_b64decode(b64 + relleno))
     except Exception:
         return None
-    if payload.get("exp", 0) < time.time() * 1000:
+    ahora = time.time() * 1000
+    if payload.get("exp", 0) < ahora:
         return None
+    colegio = colegio_gaduai()
+    if colegio:
+        if payload.get("colegioId") != colegio:
+            app.logger.warning("Acceso sin clave rechazado: el token viene de otro colegio de GADUAI.")
+            return None
+    elif os.environ.get("RENDER"):
+        # En producción no se acepta sin saber el colegio: con el GADUAI compartido, cualquier
+        # colegio podría entrar a este Relacionai.
+        app.logger.error("Falta GADUAI_COLEGIO_ID: se rechazan los accesos sin clave desde GADUAI.")
+        return None
+    for f, vence in list(_sso_usados.items()):
+        if vence < ahora:
+            _sso_usados.pop(f, None)
+    if firma in _sso_usados:
+        return None
+    _sso_usados[firma] = payload.get("exp", 0)
     return payload
 
 
@@ -279,7 +307,7 @@ def avisar_gaduai(tipo: str, **datos):
     try:
         requests.post(
             gaduai_url.rstrip("/") + "/api/sistema/avisos",
-            json={"tipo": tipo, **datos},
+            json={"tipo": tipo, "colegioId": colegio_gaduai(), **datos},
             headers={"X-Admin-Key": admin_key},
             timeout=10,
         )
@@ -322,7 +350,7 @@ def sincronizar_relatos_gaduai(rotulo: str = None) -> int:
         try:
             resp = requests.post(
                 gaduai_url.rstrip("/") + "/api/sistema/relatos",
-                json={"relatos": lote},
+                json={"colegioId": colegio_gaduai(), "relatos": lote},
                 headers={"X-Admin-Key": admin_key},
                 timeout=30,
             )
