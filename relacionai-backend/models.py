@@ -52,6 +52,15 @@ DB_PATH = Path(__file__).parent / "data" / "relacionai.db"
 DATABASE_URL = (os.environ.get("DATABASE_URL") or "").strip()
 USANDO_POSTGRES = DATABASE_URL.startswith("postgres://") or DATABASE_URL.startswith("postgresql://")
 
+# En Render (la plataforma siempre define RENDER=true) el archivo local se borra en cada
+# despliegue y reinicio: sin DATABASE_URL, un colegio perdería casos y relatos sin que nadie lo
+# note. Mejor no arrancar (el despliegue falla a la vista y sigue corriendo la versión anterior).
+if os.environ.get("RENDER") and not USANDO_POSTGRES:
+    raise RuntimeError(
+        "Falta DATABASE_URL: en Render los datos no pueden guardarse en el archivo local "
+        "porque se borran en cada despliegue. Configura la Internal Database URL de la base del colegio."
+    )
+
 if USANDO_POSTGRES:
     import psycopg2
     import psycopg2.extras
