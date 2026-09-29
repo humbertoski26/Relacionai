@@ -121,6 +121,13 @@ app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024  # 8 MB por archivo subido �
 
 models.init_db()
 
+# Relatos que ya existían antes de conectar con GADUAI: se copian al arrancar, en segundo plano
+# (GADUAI no los duplica si ya estaban).
+import threading as _threading
+_hilo_sync = _threading.Timer(20, lambda: _sincronizar_relatos_al_iniciar())
+_hilo_sync.daemon = True
+_hilo_sync.start()
+
 
 # ---------------------------------------------------------------- helpers
 
@@ -280,6 +287,63 @@ def avisar_gaduai(tipo: str, **datos):
         app.logger.exception("No se pudo avisar a GADUAI (tipo=%s)", tipo)
 
 
+def sincronizar_relatos_gaduai(rotulo: str = None) -> int:
+    """Copia a GADUAI los relatos de un caso (o de todos los casos todavía no purgados), para
+    que queden en la pestaña Entrevistas → carpeta "Relatos" de quien creó el caso, y en la del
+    Director/a de colegio. GADUAI no duplica (usa "<rótulo>#<id del relato>" como referencia),
+    así que se puede llamar las veces que sea. La copia en GADUAI se conserva aunque acá el caso
+    se purgue después. Best-effort: sin GADUAI_URL/GADUAI_ADMIN_KEY o si falla, no interrumpe nada."""
+    config = models.obtener_configuracion()
+    gaduai_url = (config["gaduai_url"] if config else None) or ""
+    admin_key = os.environ.get("GADUAI_ADMIN_KEY")
+    if not gaduai_url or not admin_key:
+        return 0
+    if rotulo:
+        casos = [models.obtener_caso(rotulo)]
+    else:
+        casos = [c for c in models.listar_casos() if c["estado"] != "purgado"]
+    payload = []
+    for caso in casos:
+        if not caso:
+            continue
+        for r in models.listar_relatos(caso["rotulo"]):
+            payload.append({
+                "ref": f'{caso["rotulo"]}#{r["id"]}',
+                "caso": caso["rotulo"],
+                "nombrePersona": r["nombre_persona"],
+                "correoPersona": r["correo_persona"] or "",
+                "contenido": r["contenido"],
+                "subidoEn": r["subido_en"],
+                "creadoPor": caso["creado_por"] or "",
+            })
+    enviados = 0
+    for i in range(0, len(payload), 25):  # lotes chicos: el texto de un relato puede ser largo
+        lote = payload[i:i + 25]
+        try:
+            resp = requests.post(
+                gaduai_url.rstrip("/") + "/api/sistema/relatos",
+                json={"relatos": lote},
+                headers={"X-Admin-Key": admin_key},
+                timeout=30,
+            )
+            if resp.ok:
+                enviados += len(lote)
+            else:
+                app.logger.warning("GADUAI rechazó el lote de relatos (HTTP %s)", resp.status_code)
+        except Exception:
+            app.logger.exception("No se pudieron copiar relatos a GADUAI")
+    return enviados
+
+
+def _sincronizar_relatos_al_iniciar():
+    try:
+        n = sincronizar_relatos_gaduai()
+        if n:
+            app.logger.info("Relatos copiados/verificados en GADUAI al iniciar: %s", n)
+    except Exception:
+        app.logger.exception("Error sincronizando relatos con GADUAI al iniciar")
+
+
 def link_correo(rotulo: str, apellido: str, descripcion: str = "", fecha_limite: str = "") -> str:
     asunto = f"Registro de relato — caso {rotulo}"
     contexto = f"\n{descripcion.strip()[:400]}\n" if descripcion else ""
@@ -332,6 +396,10 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
         _procesar_pipeline(rotulo, relato_id, contenido)
     except Exception:
         app.logger.exception("Error procesando en segundo plano el relato %s del caso %s", relato_id, rotulo)
+    try:
+        sincronizar_relatos_gaduai(rotulo)
+    except Exception:
+        app.logger.exception("Error copiando a GADUAI los relatos del caso %s", rotulo)
     if correo:
         try:
             enviar_copia_relato(correo, nombre, rotulo, contenido)
@@ -1061,6 +1129,12 @@ def tarea_recordatorios():
             persona=c.get("creado_por") or "", dias=c["dias"],
         )
         models.marcar_aviso_gaduai_etapa(c["rotulo"], c["etapa"])
+
+    # Antes de purgar: todo relato que todavía exista queda copiado en GADUAI (registro formal).
+    try:
+        sincronizar_relatos_gaduai()
+    except Exception:
+        app.logger.exception("Error sincronizando relatos con GADUAI antes de purgar")
 
     dias_retencion = models.dias_retencion()
     rotulos_a_purgar = models.casos_para_purgar(dias=dias_retencion)
