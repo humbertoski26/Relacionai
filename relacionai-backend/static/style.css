@@ -27,9 +27,11 @@
      los dos productos. good (antes verde) pasa a ser el Azul de GADUAI — el caso con más
      margen no es "todo bien" (verde), es "importante pero no urgente todavía", que es
      exactamente lo que el Azul de GADUAI ya representa. */
-  --good: #0284C7; --good-soft: #0F2A3D;
-  --warn: #D97706; --warn-soft: #3D2A0A;
-  --danger: #E11D48; --danger-soft: #3A0F1C;
+  --good: #38BDF8; --good-soft: rgba(2,132,199,.16);
+  --warn: #F59E0B; --warn-soft: rgba(217,119,6,.15);
+  --danger: #FB7185; --danger-soft: rgba(225,29,72,.15);
+  /* Gris del Triage (sin plazo / sin urgencia), aclarado para leerse sobre fondo oscuro. */
+  --neutral: #94A3B8; --neutral-soft: #1E293B;
 
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
   --radius: 10px;
@@ -61,6 +63,14 @@
 
   --gaduai-navy: #0C0B70;
   --gaduai-cyan: #0C8F7E;
+
+  /* Colores del Triage en modo claro: tinte suave de fondo y el color un poco más oscuro
+     para el texto, así se leen bien sobre blanco (antes se quedaban los fondos oscuros del
+     modo oscuro y las tarjetas se veían como bloques pesados). */
+  --good: #0369A1; --good-soft: #E0F2FE;
+  --warn: #B45309; --warn-soft: #FFEDD5;
+  --danger: #BE123C; --danger-soft: #FFE4E6;
+  --neutral: #475569; --neutral-soft: #F1F5F9;
 }
 *{ box-sizing:border-box; }
 body{ margin:0; background:var(--bg); color:var(--ink); font-family:var(--font-body); font-size:15px; line-height:1.55; }
@@ -182,23 +192,24 @@ footer{ margin-top:40px; padding-top:18px; border-top:1px solid var(--border); f
 .campo-correo-destacado label{ font-size:14px; color:var(--accent-ink); }
 .campo-correo-destacado input{ font-size:16px; padding:13px 14px; background:var(--surface); border-color:var(--accent); }
 
-.alertas-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; }
+.alertas-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:22px; align-items:start; }
 @media (max-width:900px){ .alertas-row{ grid-template-columns:repeat(2,1fr); } }
-details.alerta-caja{ border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; }
+/* Tarjetas de pendientes por plazo, con los colores del Triage: Rojo (1 día o menos),
+   Naranjo (2 días), Azul (más de 2 días) y Gris (sin plazo). Tarjeta con tinte suave y
+   franja lateral del color; el detalle se despliega sobre el fondo normal de tarjeta. */
+details.alerta-caja{ border-radius:var(--radius); box-shadow:var(--shadow); overflow:hidden; border:1px solid var(--border); border-left:4px solid var(--alerta-color); background:var(--surface); }
 details.alerta-caja summary{ list-style:none; cursor:pointer; padding:16px 18px; display:flex; flex-direction:column; gap:2px; }
 details.alerta-caja summary::-webkit-details-marker{ display:none; }
-details.alerta-caja summary .num{ font-family:var(--font-mono); font-size:22px; font-weight:500; }
-details.alerta-caja summary .lbl{ font-size:12px; opacity:.85; }
-details.alerta-caja .alerta-body{ padding:0 18px 16px; }
-.alerta-rojo summary{ background:var(--danger-soft); color:var(--danger); }
-.alerta-rojo .alerta-body{ background:var(--danger-soft); }
-.alerta-amarillo summary{ background:var(--warn-soft); color:var(--warn); }
-.alerta-amarillo .alerta-body{ background:var(--warn-soft); }
-.alerta-verde summary{ background:var(--good-soft); color:var(--good); }
-.alerta-verde .alerta-body{ background:var(--good-soft); }
-.alerta-sin_plazo summary{ background:var(--surface-sunken); color:var(--ink-muted); }
-.alerta-sin_plazo .alerta-body{ background:var(--surface-sunken); }
-.alerta-fila{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 0; border-top:1px solid rgba(0,0,0,.08); font-size:13px; }
+details.alerta-caja summary{ background:var(--alerta-soft); }
+details.alerta-caja summary:hover{ filter:brightness(1.03); }
+details.alerta-caja summary .num{ font-family:var(--font-mono); font-size:26px; font-weight:600; color:var(--alerta-color); }
+details.alerta-caja summary .lbl{ font-size:12px; color:var(--ink-muted); }
+details.alerta-caja .alerta-body{ padding:6px 18px 16px; background:var(--surface); }
+.alerta-rojo{ --alerta-color:var(--danger); --alerta-soft:var(--danger-soft); }
+.alerta-amarillo{ --alerta-color:var(--warn); --alerta-soft:var(--warn-soft); }
+.alerta-verde{ --alerta-color:var(--good); --alerta-soft:var(--good-soft); }
+.alerta-sin_plazo{ --alerta-color:var(--neutral); --alerta-soft:var(--neutral-soft); }
+.alerta-fila{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; padding:9px 0; border-top:1px solid var(--border); font-size:13px; }
 .alerta-fila:first-child{ border-top:none; }
 .alerta-fila .acciones{ display:flex; gap:6px; }
 .alerta-fila .acciones button, .alerta-fila .acciones a{ background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:4px 9px; font-size:11.5px; color:var(--ink); text-decoration:none; cursor:pointer; }
