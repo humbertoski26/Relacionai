@@ -197,7 +197,21 @@ CREATE TABLE IF NOT EXISTS usuarios (
     ultimo_ingreso_en TEXT
 );
 
+-- Códigos de verificación del correo de quien sube un relato: se guarda solo un hash del
+-- código, con vencimiento y un tope de intentos.
+CREATE TABLE IF NOT EXISTS verificaciones_correo (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rotulo TEXT NOT NULL,
+    email TEXT NOT NULL,
+    codigo_hash TEXT NOT NULL,
+    creado_en TEXT NOT NULL,
+    expira_en TEXT NOT NULL,
+    intentos INTEGER NOT NULL DEFAULT 0,
+    verificado_en TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_relatos_caso ON relatos(caso_id);
+CREATE INDEX IF NOT EXISTS idx_verificaciones_correo ON verificaciones_correo(rotulo, email);
 CREATE INDEX IF NOT EXISTS idx_historial_caso ON historial(caso_id);
 CREATE INDEX IF NOT EXISTS idx_destinatarios_caso ON destinatarios(caso_id);
 """
@@ -383,6 +397,46 @@ def set_fecha_limite(rotulo: str, fecha_limite: str, actor: str = "Encargado de 
         rotulo, actor=actor,
         accion=(f"Definió el {fecha_limite} como fecha máxima de entrega." if fecha_limite else "Quitó la fecha máxima de entrega."),
     )
+
+
+def crear_codigo_verificacion(rotulo: str, email: str, codigo_hash: str, minutos: int = 10) -> None:
+    ahora = datetime.now(timezone.utc)
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO verificaciones_correo (rotulo, email, codigo_hash, creado_en, expira_en) VALUES (?, ?, ?, ?, ?)",
+            (rotulo, email.strip().lower(), codigo_hash, ahora.isoformat(), (ahora + timedelta(minutes=minutos)).isoformat()),
+        )
+
+
+def contar_codigos_desde(rotulo: str, email: str, desde_iso: str) -> int:
+    """Cuántos códigos se pidieron para este correo y caso desde una fecha — para frenar
+    el envío repetido de correos."""
+    with get_conn() as conn:
+        fila = conn.execute(
+            "SELECT COUNT(*) AS n FROM verificaciones_correo WHERE rotulo = ? AND email = ? AND creado_en >= ?",
+            (rotulo, email.strip().lower(), desde_iso),
+        ).fetchone()
+        return fila["n"] if fila else 0
+
+
+def ultimo_codigo_vigente(rotulo: str, email: str):
+    """El último código sin usar y sin vencer de este correo para este caso."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM verificaciones_correo WHERE rotulo = ? AND email = ? AND verificado_en IS NULL "
+            "AND expira_en > ? ORDER BY id DESC LIMIT 1",
+            (rotulo, email.strip().lower(), now_iso()),
+        ).fetchone()
+
+
+def registrar_intento_codigo(verificacion_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE verificaciones_correo SET intentos = intentos + 1 WHERE id = ?", (verificacion_id,))
+
+
+def marcar_codigo_verificado(verificacion_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE verificaciones_correo SET verificado_en = ? WHERE id = ?", (now_iso(), verificacion_id))
 
 
 def contar_relatos_de_correo(rotulo: str, correo: str) -> int:

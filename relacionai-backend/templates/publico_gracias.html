@@ -8,10 +8,13 @@
   <p style="color:var(--ink-muted); font-size:13.5px;">
     Tu relato quedó registrado en el caso <strong>{{ caso['rotulo'] }}</strong>. La persona encargada lo revisará junto con el resto de los antecedentes.
   </p>
+  {% if numero %}
+  <p style="font-size:13px; margin-top:12px;">N° de comprobante: <strong>{{ numero }}</strong>{% if fecha_hora %} · {{ fecha_hora }}{% endif %}</p>
+  {% endif %}
   {% if correo %}
   <p style="color:var(--ink-muted); font-size:12.5px; margin-top:10px;">
-    En unos minutos debería llegarte una copia de tu relato a {{ correo }}. Si no llega, no te
-    preocupes — tu relato ya quedó guardado igual.
+    En unos minutos te llegará a {{ correo }} el comprobante de entrega con una copia de tu relato.
+    Si no llega, revisa la carpeta de spam; tu relato ya quedó guardado igual.
   </p>
   {% endif %}
 </div>

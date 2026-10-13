@@ -12,17 +12,50 @@
 <div class="flash flash-ok" style="margin-bottom:16px;">Por favor completa tu relato antes del <strong>{{ caso['fecha_limite'] }}</strong>.</div>
 {% endif %}
 
-<form class="card" style="padding:24px;" method="post" enctype="multipart/form-data" id="relato-form">
+<div class="pasos-verif" style="display:flex; gap:8px; margin-bottom:16px; font-size:12.5px; font-weight:600;">
+  <span class="pill" style="padding:4px 10px; border-radius:999px; {{ 'background:var(--accent); color:#fff;' if paso == 'correo' else 'background:var(--surface-sunken); color:var(--ink-muted);' }}">1 · Tu correo</span>
+  <span class="pill" style="padding:4px 10px; border-radius:999px; {{ 'background:var(--accent); color:#fff;' if paso == 'codigo' else 'background:var(--surface-sunken); color:var(--ink-muted);' }}">2 · Código</span>
+  <span class="pill" style="padding:4px 10px; border-radius:999px; {{ 'background:var(--accent); color:#fff;' if paso == 'relato' else 'background:var(--surface-sunken); color:var(--ink-muted);' }}">3 · Tu relato</span>
+</div>
+
+{% if paso == 'correo' %}
+<form class="card" style="padding:24px;" method="post" action="{{ url_for('caso_publico_codigo', rotulo=caso['rotulo']) }}">
   <div class="field">
     <label for="nombre">Tu nombre</label>
-    <input type="text" id="nombre" name="nombre" required>
+    <input type="text" id="nombre" name="nombre" required value="{{ verif.get('nombre', '') }}" autocomplete="name">
   </div>
-
   <div class="field campo-correo-destacado">
     <label for="correo">Tu correo (obligatorio)</label>
-    <input type="email" id="correo" name="correo" required placeholder="tucorreo@ejemplo.cl" autocomplete="email">
-    <div class="hint">Lo necesitamos para poder enviarte una copia de lo que registres (puedes enviar hasta 2 relatos con este correo para este caso).</div>
+    <input type="email" id="correo" name="correo" required placeholder="tucorreo@ejemplo.cl" autocomplete="email" value="{{ verif.get('correo', '') }}">
+    <div class="hint">Te enviaremos un código de verificación. Después de entregar tu relato, a este mismo correo te llegará el comprobante con una copia.</div>
   </div>
+  <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Enviarme el código</button>
+</form>
+
+{% elif paso == 'codigo' %}
+<form class="card" style="padding:24px;" method="post" action="{{ url_for('caso_publico_verificar', rotulo=caso['rotulo']) }}">
+  <div class="field">
+    <label for="codigo">Escribe el código que te enviamos a <strong>{{ verif.get('correo') }}</strong></label>
+    <input type="text" id="codigo" name="codigo" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]*" maxlength="7"
+           placeholder="000000" style="font-size:24px; letter-spacing:8px; text-align:center;" autofocus>
+    <div class="hint">El código tiene 6 números y vence en {{ minutos }} minutos. Si no lo ves, revisa la carpeta de spam o correo no deseado.</div>
+  </div>
+  <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Verificar y continuar</button>
+</form>
+<div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap; margin-top:12px;">
+  <form method="post" action="{{ url_for('caso_publico_codigo', rotulo=caso['rotulo']) }}">
+    <input type="hidden" name="nombre" value="{{ verif.get('nombre', '') }}">
+    <input type="hidden" name="correo" value="{{ verif.get('correo', '') }}">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;">Reenviar el código</button>
+  </form>
+  <form method="post" action="{{ url_for('caso_publico_cambiar_correo', rotulo=caso['rotulo']) }}">
+    <button type="submit" class="btn btn-ghost" style="font-size:13px;">Usar otro correo</button>
+  </form>
+</div>
+
+{% else %}
+<form class="card" style="padding:24px;" method="post" enctype="multipart/form-data" id="relato-form">
+  <div class="flash flash-ok" style="margin-bottom:16px;">✓ Correo verificado: <strong>{{ verif.get('correo') }}</strong> · {{ verif.get('nombre') }}</div>
 
   <div class="field">
     <label>¿Cómo quieres entregar tu relato?</label>
@@ -52,9 +85,14 @@
 
   <button type="submit" class="btn btn-primary" style="width:100%; justify-content:center;">Enviar relato</button>
 </form>
+<form method="post" action="{{ url_for('caso_publico_cambiar_correo', rotulo=caso['rotulo']) }}" style="text-align:center; margin-top:10px;">
+  <button type="submit" class="btn btn-ghost" style="font-size:13px;">No soy yo · usar otro correo</button>
+</form>
+{% endif %}
 
 <script>
   var mTexto = document.getElementById('m-texto');
+  if (mTexto) {
   var mArchivo = document.getElementById('m-archivo');
   var campoTexto = document.getElementById('campo-texto');
   var campoArchivo = document.getElementById('campo-archivo');
@@ -69,6 +107,7 @@
   }
   mTexto.addEventListener('click', function(){ setMetodo('texto'); });
   mArchivo.addEventListener('click', function(){ setMetodo('archivo'); });
+  }
 </script>
 
 <script>

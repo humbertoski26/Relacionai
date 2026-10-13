@@ -72,16 +72,42 @@ def _enviar(destinatario: str, asunto: str, cuerpo: str) -> bool:
         return False
 
 
-def enviar_copia_relato(email: str, nombre: str, rotulo: str, contenido: str) -> bool:
-    asunto = f"Copia de tu relato — caso {rotulo}"
+def enviar_codigo_verificacion(email: str, codigo: str, rotulo: str, nombre_colegio: str = "", minutos: int = 10) -> bool:
+    colegio = f" · {nombre_colegio}" if nombre_colegio else ""
+    asunto = f"Tu código de verificación: {codigo} — caso {rotulo}{colegio}"
+    cuerpo = (
+        "Hola,\n\n"
+        f"Tu código para continuar con tu relato en el caso {rotulo} es:\n\n"
+        f"    {codigo}\n\n"
+        f"Escríbelo en la página del relato. Vence en {minutos} minutos y sirve una sola vez.\n\n"
+        "Si no pediste este código, puedes ignorar este correo: nadie podrá registrar un relato "
+        "con tu correo sin él."
+    )
+    return _enviar(email, asunto, cuerpo)
+
+
+def enviar_copia_relato(email: str, nombre: str, rotulo: str, contenido: str,
+                        numero: str = "", fecha_hora: str = "", archivo: str = "", nombre_colegio: str = "") -> bool:
+    """Comprobante de entrega: confirma que el relato quedó registrado y deja una copia."""
+    colegio = f" · {nombre_colegio}" if nombre_colegio else ""
+    asunto = f"Comprobante de entrega de tu relato — caso {rotulo}{colegio}"
+    detalle = [f"Caso: {rotulo}", f"Entregado por: {nombre} ({email})"]
+    if fecha_hora:
+        detalle.append(f"Fecha y hora: {fecha_hora}")
+    if numero:
+        detalle.append(f"N° de comprobante: {numero}")
+    if archivo:
+        detalle.append(f"Archivo adjunto: {archivo}")
     cuerpo = (
         f"Hola {nombre},\n\n"
-        f"Esta es la copia del relato que registraste en el caso {rotulo}.\n\n"
+        "Tu relato quedó registrado correctamente. Este correo es tu comprobante de entrega.\n\n"
+        + "\n".join(detalle) + "\n\n"
+        "Copia de tu relato:\n"
         "----------------------------------------\n"
         f"{contenido}\n"
         "----------------------------------------\n\n"
-        "Este correo es solo para que tengas tu propio respaldo. Si no fuiste tú quien "
-        "subió este relato, puedes ignorar este mensaje."
+        "Solo la persona encargada de convivencia escolar puede ver tu relato. "
+        "Guarda este correo como respaldo."
     )
     return _enviar(email, asunto, cuerpo)
 

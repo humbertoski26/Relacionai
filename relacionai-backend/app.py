@@ -19,9 +19,10 @@ import hmac
 import json
 import os
 import re
+import secrets
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -35,6 +36,7 @@ import models
 import tasks
 from claude_client import resumir_relato, resumir_reglamento, sintetizar_caso
 from email_client import (
+    enviar_codigo_verificacion,
     enviar_copia_relato,
     enviar_informe_encargado,
     enviar_invitacion,
@@ -416,7 +418,18 @@ def _procesar_pipeline(rotulo: str, relato_id: int, contenido: str):
     )
 
 
-def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str, link_caso_privado: str = ""):
+def _ahora_chile_texto() -> str:
+    """Fecha y hora de Chile para el comprobante, ej. '13-10-2026 a las 15:42 hrs'."""
+    try:
+        from zoneinfo import ZoneInfo
+        ahora = datetime.now(ZoneInfo("America/Santiago"))
+    except Exception:
+        ahora = datetime.now()
+    return ahora.strftime("%d-%m-%Y a las %H:%M hrs")
+
+
+def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: str, nombre: str, correo: str, link_caso_privado: str = "",
+                                      archivo_original: str = "", fecha_hora: str = ""):
     """Se ejecuta en un hilo aparte para que la persona no tenga que esperar a Claude
     (ni al envío de su copia por correo, ni al aviso al encargado) antes de ver la
     confirmación."""
@@ -430,7 +443,12 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
         app.logger.exception("Error copiando a GADUAI los relatos del caso %s", rotulo)
     if correo:
         try:
-            enviar_copia_relato(correo, nombre, rotulo, contenido)
+            config_c = models.obtener_configuracion()
+            enviar_copia_relato(
+                correo, nombre, rotulo, contenido,
+                numero=f"{rotulo}-{relato_id}", fecha_hora=fecha_hora, archivo=archivo_original or "",
+                nombre_colegio=((config_c["nombre_colegio"] if config_c else "") or ""),
+            )
         except Exception:
             app.logger.exception("Error enviando la copia del relato a %s", correo)
     try:
@@ -1059,6 +1077,39 @@ def encargado_descargar_relato(rotulo, relato_id):
 
 # --- página pública para subir un relato -------------------------------
 
+# Antes de escribir su relato, la persona confirma su correo con un código de 6 dígitos que
+# le llega por correo. Así el comprobante y la copia llegan a quien de verdad lo escribió, y
+# nadie puede subir un relato a nombre de otro correo. El estado vive en la sesión (cookie
+# firmada): "pendiente" mientras espera el código, "ok" una vez verificado (por 2 horas).
+CODIGO_MINUTOS = 10
+CODIGO_MAX_INTENTOS = 5
+VERIFICACION_HORAS = 2
+
+
+def _verificacion(rotulo):
+    return (session.get("verif_correo") or {}).get(rotulo)
+
+
+def _guardar_verificacion(rotulo, datos):
+    todas = dict(session.get("verif_correo") or {})
+    if datos is None:
+        todas.pop(rotulo, None)
+    else:
+        todas[rotulo] = datos
+    session["verif_correo"] = todas
+
+
+def _correo_verificado(rotulo):
+    v = _verificacion(rotulo)
+    if v and v.get("estado") == "ok" and v.get("vence", 0) > time.time():
+        return v
+    return None
+
+
+def _hash_codigo(rotulo, correo, codigo):
+    return hmac.new(app.secret_key.encode(), f"{rotulo}|{correo.strip().lower()}|{codigo}".encode(), hashlib.sha256).hexdigest()
+
+
 @app.route("/caso/<rotulo>", methods=["GET"])
 @limite_intentos("caso_publico", tope=60)
 def caso_publico(rotulo):
@@ -1067,7 +1118,96 @@ def caso_publico(rotulo):
         return render_template("publico_no_encontrado.html"), 404
     if caso["estado"] != "abierto":
         return render_template("publico_cerrado.html", caso=caso), 410
-    return render_template("publico_caso.html", caso=caso)
+    v = _verificacion(rotulo)
+    if _correo_verificado(rotulo):
+        paso = "relato"
+    elif v and v.get("estado") == "pendiente":
+        paso = "codigo"
+    else:
+        paso = "correo"
+    return render_template("publico_caso.html", caso=caso, paso=paso, verif=v or {}, minutos=CODIGO_MINUTOS)
+
+
+@app.route("/caso/<rotulo>/codigo", methods=["POST"])
+@limite_intentos("caso_publico_codigo", tope=15)
+def caso_publico_codigo(rotulo):
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
+    nombre = (request.form.get("nombre") or "").strip()
+    correo = (request.form.get("correo") or "").strip()
+    if not nombre:
+        flash("Por favor indica tu nombre.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if not correo or not correo_valido(correo):
+        flash("Revisa tu correo: debe tener @ y una extensión válida, ej. .cl o .com.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if models.contar_relatos_de_correo(rotulo, correo) >= MAX_RELATOS_POR_PERSONA:
+        flash(
+            f"Ya registraste {MAX_RELATOS_POR_PERSONA} relatos con este correo en este caso — "
+            "por ahora el link queda deshabilitado para ti. Si necesitas agregar algo más, "
+            "contacta directamente a la persona encargada de convivencia escolar.",
+            "error",
+        )
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+
+    ahora = datetime.now(timezone.utc)
+    if models.contar_codigos_desde(rotulo, correo, (ahora - timedelta(seconds=60)).isoformat()):
+        _guardar_verificacion(rotulo, {"estado": "pendiente", "correo": correo, "nombre": nombre})
+        flash("Ya te enviamos un código hace menos de un minuto. Revisa tu correo (también la carpeta de spam).", "ok")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if models.contar_codigos_desde(rotulo, correo, (ahora - timedelta(hours=1)).isoformat()) >= 5:
+        flash("Pediste demasiados códigos para este correo. Espera una hora e inténtalo de nuevo.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+
+    codigo = f"{secrets.randbelow(1_000_000):06d}"
+    config = models.obtener_configuracion()
+    nombre_colegio = ((config["nombre_colegio"] if config else "") or "")
+    if not enviar_codigo_verificacion(correo, codigo, rotulo, nombre_colegio=nombre_colegio, minutos=CODIGO_MINUTOS):
+        flash("No pudimos enviar el código a ese correo. Revisa que esté bien escrito e inténtalo de nuevo en unos minutos.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    models.crear_codigo_verificacion(rotulo, correo, _hash_codigo(rotulo, correo, codigo), minutos=CODIGO_MINUTOS)
+    _guardar_verificacion(rotulo, {"estado": "pendiente", "correo": correo, "nombre": nombre})
+    flash(f"Te enviamos un código de 6 dígitos a {correo}.", "ok")
+    return redirect(url_for("caso_publico", rotulo=rotulo))
+
+
+@app.route("/caso/<rotulo>/verificar", methods=["POST"])
+@limite_intentos("caso_publico_verificar", tope=30)
+def caso_publico_verificar(rotulo):
+    caso = models.obtener_caso(rotulo)
+    if not caso:
+        return render_template("publico_no_encontrado.html"), 404
+    if caso["estado"] != "abierto":
+        return render_template("publico_cerrado.html", caso=caso), 410
+    v = _verificacion(rotulo)
+    if not v or v.get("estado") != "pendiente":
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    codigo = re.sub(r"\D", "", request.form.get("codigo") or "")
+    fila = models.ultimo_codigo_vigente(rotulo, v["correo"])
+    if not fila:
+        flash("El código venció. Pide uno nuevo.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if fila["intentos"] >= CODIGO_MAX_INTENTOS:
+        flash("Ingresaste muchos códigos incorrectos. Pide un código nuevo.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    if len(codigo) != 6 or not hmac.compare_digest(fila["codigo_hash"], _hash_codigo(rotulo, v["correo"], codigo)):
+        models.registrar_intento_codigo(fila["id"])
+        flash("El código no coincide. Revísalo e inténtalo de nuevo.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    models.marcar_codigo_verificado(fila["id"])
+    _guardar_verificacion(rotulo, {"estado": "ok", "correo": v["correo"], "nombre": v["nombre"],
+                                   "vence": time.time() + VERIFICACION_HORAS * 3600})
+    flash("Correo verificado. Ya puedes escribir tu relato.", "ok")
+    return redirect(url_for("caso_publico", rotulo=rotulo))
+
+
+@app.route("/caso/<rotulo>/cambiar-correo", methods=["POST"])
+def caso_publico_cambiar_correo(rotulo):
+    _guardar_verificacion(rotulo, None)
+    return redirect(url_for("caso_publico", rotulo=rotulo))
 
 
 @app.route("/caso/<rotulo>", methods=["POST"])
@@ -1079,15 +1219,15 @@ def caso_publico_enviar(rotulo):
     if caso["estado"] != "abierto":
         return render_template("publico_cerrado.html", caso=caso), 410
 
-    nombre = (request.form.get("nombre") or "").strip()
-    correo = (request.form.get("correo") or "").strip()
+    # El nombre y el correo salen de la verificación, no del formulario: así nadie puede
+    # cambiar el correo después de verificarlo.
+    v = _correo_verificado(rotulo)
+    if not v:
+        flash("Antes de enviar tu relato, verifica tu correo con el código que te enviamos.", "error")
+        return redirect(url_for("caso_publico", rotulo=rotulo))
+    nombre = v["nombre"]
+    correo = v["correo"]
     metodo = request.form.get("metodo") or "texto"
-    if not nombre:
-        flash("Por favor indica tu nombre.", "error")
-        return redirect(url_for("caso_publico", rotulo=rotulo))
-    if not correo or not correo_valido(correo):
-        flash("Indica tu correo (lo necesitamos para poder enviarte una copia de tu relato) — revisa que tenga @ y una extensión válida, ej. .cl o .com.", "error")
-        return redirect(url_for("caso_publico", rotulo=rotulo))
 
     if models.contar_relatos_de_correo(rotulo, correo) >= MAX_RELATOS_POR_PERSONA:
         flash(
@@ -1117,14 +1257,18 @@ def caso_publico_enviar(rotulo):
         archivo_original = None
 
     relato_id = models.agregar_relato(rotulo, nombre, formato, archivo_original, contenido, correo_persona=correo)
+    fecha_hora = _ahora_chile_texto()
+    _guardar_verificacion(rotulo, None)  # otro relato con el mismo correo pide un código nuevo
 
     # El análisis con Claude (y el envío de la copia por correo, y el aviso al encargado)
     # puede tardar bastante — se hace en segundo plano para que la persona vea la
     # confirmación de inmediato en vez de tener que esperar. El link privado se arma acá
     # (con contexto de request todavía disponible) y se pasa ya armado al hilo.
-    tasks.encolar(_procesar_relato_en_segundo_plano, rotulo, relato_id, contenido, nombre, correo, link_caso_privado(rotulo))
+    tasks.encolar(_procesar_relato_en_segundo_plano, rotulo, relato_id, contenido, nombre, correo, link_caso_privado(rotulo),
+                  archivo_original or "", fecha_hora)
 
-    return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo)
+    return render_template("publico_gracias.html", caso=caso, nombre=nombre, correo=correo,
+                           numero=f"{rotulo}-{relato_id}", fecha_hora=fecha_hora)
 
 
 # --- job diario de mantenimiento (llamado por un Render Cron Job) -----

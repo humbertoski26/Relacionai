@@ -61,6 +61,31 @@ appmod.enviar_copia_relato = lambda *a, **k: _fake_enviar(a[0], "copia", "")
 appmod.enviar_invitacion = lambda email, rotulo, link, fecha_limite="", mensaje="": _fake_enviar(email, "invitacion", "")
 appmod.enviar_recordatorio = lambda *a, **k: _fake_enviar(a[0], "recordatorio", "")
 
+# Verificación del correo: el código que "llegaría" por correo queda guardado acá.
+_codigos = {}
+def _fake_enviar_codigo(email, codigo, rotulo, nombre_colegio="", minutos=10):
+    _codigos[(rotulo, email.lower())] = codigo
+    _correos_enviados.append((email, "codigo"))
+    return True
+appmod.enviar_codigo_verificacion = _fake_enviar_codigo
+_contar_codigos_real = models.contar_codigos_desde
+models.contar_codigos_desde = lambda *a, **k: 0  # sin la espera de 60 s entre códigos en las pruebas
+
+def enviar_relato(c, url, data=None, **kw):
+    """Hace el flujo completo de la página pública: pide el código, lo verifica y envía el
+    relato. Si un paso falla (correo inválido, caso cerrado), devuelve esa respuesta."""
+    data = dict(data or {})
+    rotulo = url.rsplit("/", 1)[-1]
+    appmod._intentos.clear()  # el tope por IP es para personas reales, no para la batería de pruebas
+    nombre, correo = data.pop("nombre", ""), data.pop("correo", "")
+    r = c.post(f"/caso/{rotulo}/codigo", data={"nombre": nombre, "correo": correo}, follow_redirects=False)
+    if r.status_code != 302:
+        return r
+    codigo = _codigos.pop((rotulo, (correo or "").lower()), None)
+    if codigo:
+        c.post(f"/caso/{rotulo}/verificar", data={"codigo": codigo}, follow_redirects=False)
+    return c.post(url, data=data, **kw)
+
 _informes_enviados = []
 def _fake_enviar_informe(email, rotulo, apellido, docx_bytes, nombre_archivo, dias_retencion=15, nombre_colegio=""):
     _informes_enviados.append((email, rotulo, nombre_archivo, len(docx_bytes), dias_retencion, nombre_colegio))
@@ -216,18 +241,38 @@ def test_flujo_caso_completo():
         check("publico: caso abierto muestra formulario", r.status_code == 200 and b"correo" in r.data.lower())
 
         # publico: envio sin correo -> rechazado
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Juan", "relato": "Pasó algo importante."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Juan", "relato": "Pasó algo importante."}, follow_redirects=True)
         check("publico: relato sin correo es rechazado", len(models.listar_relatos(rotulo)) == 0)
 
         # publico: envio con correo invalido -> rechazado
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Juan", "correo": "sin-arroba", "relato": "Pasó algo."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Juan", "correo": "sin-arroba", "relato": "Pasó algo."}, follow_redirects=True)
         check("publico: relato con correo invalido es rechazado", len(models.listar_relatos(rotulo)) == 0)
 
+        # verificación del correo: sin código no entra, con código incorrecto tampoco
+        appmod._intentos.clear()
+        r = c.post(f"/caso/{rotulo}", data={"relato": "Intento sin verificar."}, follow_redirects=True)
+        check("verificacion: relato sin verificar el correo es rechazado", len(models.listar_relatos(rotulo)) == 0 and "verifica tu correo".encode() in r.data)
+        c.post(f"/caso/{rotulo}/codigo", data={"nombre": "Pedro", "correo": "pedro@correo.cl"})
+        codigo = _codigos.pop((rotulo, "pedro@correo.cl"), "")
+        check("verificacion: se envía un código de 6 dígitos", len(codigo) == 6 and codigo.isdigit())
+        r = c.get(f"/caso/{rotulo}")
+        check("verificacion: la página pide el código", b"one-time-code" in r.data)
+        malo = "111111" if codigo != "111111" else "222222"
+        r = c.post(f"/caso/{rotulo}/verificar", data={"codigo": malo}, follow_redirects=True)
+        check("verificacion: código incorrecto es rechazado", "no coincide".encode() in r.data)
+        fila = models.ultimo_codigo_vigente(rotulo, "pedro@correo.cl")
+        check("verificacion: se guarda solo el hash del código", fila is not None and codigo not in fila["codigo_hash"])
+        r = c.post(f"/caso/{rotulo}/verificar", data={"codigo": codigo}, follow_redirects=True)
+        check("verificacion: código correcto permite escribir el relato", "Correo verificado".encode() in r.data and b"relato-form" in r.data)
+        c.post(f"/caso/{rotulo}/cambiar-correo")
+        r = c.get(f"/caso/{rotulo}")
+        check("verificacion: 'usar otro correo' vuelve al primer paso", b"one-time-code" not in r.data and b"relato-form" not in r.data)
+
         # publico: envio valido -> aceptado (dos relatos de la misma persona)
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Juan Soto", "correo": "juan@correo.cl", "relato": "Primer relato de Juan."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Juan Soto", "correo": "juan@correo.cl", "relato": "Primer relato de Juan."}, follow_redirects=True)
         check("publico: relato valido aceptado", r.status_code == 200)
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Juan Soto", "correo": "juan@correo.cl", "relato": "Segundo relato de Juan."}, follow_redirects=True)
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Ana Lira", "correo": "ana@correo.cl", "relato": "Relato de otra persona."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Juan Soto", "correo": "juan@correo.cl", "relato": "Segundo relato de Juan."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Ana Lira", "correo": "ana@correo.cl", "relato": "Relato de otra persona."}, follow_redirects=True)
 
         import time
         time.sleep(0.4)
@@ -247,7 +292,7 @@ def test_flujo_caso_completo():
         check("template: pill de estado NO aparece para caso abierto (solo en cerrado/purgado)", b"pill-abierto" not in r.data.replace(b"pill-abierto\">", b"__SKIP__") or True)
 
         # sintesis_desactualizada: forzar agregando otro relato despues de sintetizada
-        r2 = c.post(f"/caso/{rotulo}", data={"nombre": "Otra Persona", "correo": "otra@correo.cl", "relato": "Relato tardio."}, follow_redirects=True)
+        r2 = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Otra Persona", "correo": "otra@correo.cl", "relato": "Relato tardio."}, follow_redirects=True)
         time.sleep(0.4)
         r = c.get(f"/encargado/casos/{rotulo}")
         # como el pipeline automatico ya re-sintetiza tras cada relato, sintesis_desactualizada deberia
@@ -272,7 +317,7 @@ def test_flujo_caso_completo():
         # publico ya no deberia aceptar relatos nuevos (caso cerrado)
         r = c.get(f"/caso/{rotulo}")
         check("publico: caso cerrado responde 410", r.status_code == 410)
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Tarde", "correo": "tarde@correo.cl", "relato": "x"}, follow_redirects=False)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Tarde", "correo": "tarde@correo.cl", "relato": "x"}, follow_redirects=False)
         check("publico: POST a caso cerrado tambien responde 410", r.status_code == 410)
 
         # segunda descarga de informe no debe re-enviar correo (era_abierto ya es False)
@@ -353,7 +398,7 @@ def test_adjuntos():
         docx_doc.add_paragraph("Este es mi relato en un archivo Word.")
         docx_doc.save(buf)
         buf.seek(0)
-        r = c.post(f"/caso/{rotulo}", data={
+        r = enviar_relato(c, f"/caso/{rotulo}", data={
             "nombre": "Persona Archivo", "correo": "archivo@correo.cl", "metodo": "archivo",
             "archivo": (buf, "mi_relato.docx"),
         }, content_type="multipart/form-data", follow_redirects=True)
@@ -436,7 +481,7 @@ def test_reglamento_retroactivo():
         models.quitar_reglamento()  # estado limpio: pruebas anteriores ya pudieron haber subido uno
         c.post("/encargado/casos", data={"apellido": "Retroactivo"}, follow_redirects=True)
         rotulo = [x for x in models.listar_casos() if x["apellido"] == "Retroactivo"][0]["rotulo"]
-        c.post(f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "r@correo.cl", "relato": "Un relato cualquiera para sintetizar."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "r@correo.cl", "relato": "Un relato cualquiera para sintetizar."}, follow_redirects=True)
         import time; time.sleep(0.3)
 
         caso_antes = models.obtener_caso(rotulo)
@@ -496,7 +541,7 @@ def test_alertas_dashboard():
 
         # al completar el relato, el destinatario deja de aparecer en cualquier cuadro
         rotulo_verde = rotulos["AlertaVerde"]
-        c.post(f"/caso/{rotulo_verde}", data={"nombre": "Cumplidor", "correo": f"pendiente-alertaverde@colegio.cl", "relato": "Ya lo mande."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo_verde}", data={"nombre": "Cumplidor", "correo": f"pendiente-alertaverde@colegio.cl", "relato": "Ya lo mande."}, follow_redirects=True)
         pendientes2 = models.pendientes_por_urgencia()
         verdes2 = {it["rotulo"] for it in pendientes2["verde"]}
         check("alertas: al completar el relato, desaparece del cuadro correspondiente", rotulo_verde not in verdes2)
@@ -526,7 +571,7 @@ def test_alertas_pendientes_sin_plazo():
         check("sin plazo: el correo pendiente aparece listado en el escritorio", b"pendiente-sinplazo@colegio.cl" in r.data)
 
         # al completar el relato, tambien desaparece del cuadro sin_plazo
-        c.post(f"/caso/{rotulo}", data={"nombre": "Cumplidor Sin Plazo", "correo": "pendiente-sinplazo@colegio.cl", "relato": "Listo."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Cumplidor Sin Plazo", "correo": "pendiente-sinplazo@colegio.cl", "relato": "Listo."}, follow_redirects=True)
         pendientes2 = models.pendientes_por_urgencia()
         rotulos_sin_plazo2 = {it["rotulo"] for it in pendientes2["sin_plazo"]}
         check("sin plazo: al completar el relato, desaparece del cuadro 'sin_plazo'", rotulo not in rotulos_sin_plazo2)
@@ -615,23 +660,23 @@ def test_limite_relatos_por_persona():
         rotulo = [x for x in models.listar_casos() if x["apellido"] == "LimiteRelatos"][0]["rotulo"]
         correo = "misma-persona@colegio.cl"
 
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número uno."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número uno."}, follow_redirects=True)
         check("limite relatos: primer relato aceptado", r.status_code == 200)
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número dos."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número dos."}, follow_redirects=True)
         check("limite relatos: segundo relato aceptado", r.status_code == 200)
 
         import time; time.sleep(0.3)
         relatos = models.listar_relatos(rotulo)
         check("limite relatos: dos relatos guardados hasta ahora", len(relatos) == 2)
 
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número tres — no debería entrar."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Misma Persona", "correo": correo, "relato": "Relato número tres — no debería entrar."}, follow_redirects=True)
         check("limite relatos: el tercer relato con el mismo correo es rechazado", "queda deshabilitado".encode() in r.data)
 
         relatos_despues = models.listar_relatos(rotulo)
         check("limite relatos: sigue habiendo solo dos relatos guardados", len(relatos_despues) == 2)
 
         # otra persona (correo distinto) sí puede enviar el suyo sin problema
-        r = c.post(f"/caso/{rotulo}", data={"nombre": "Otra Persona", "correo": "otra-persona@colegio.cl", "relato": "Relato de otra persona."}, follow_redirects=True)
+        r = enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Otra Persona", "correo": "otra-persona@colegio.cl", "relato": "Relato de otra persona."}, follow_redirects=True)
         time.sleep(0.3)
         relatos_final = models.listar_relatos(rotulo)
         check("limite relatos: una persona distinta si puede enviar el suyo", len(relatos_final) == 3)
@@ -666,7 +711,7 @@ def test_descargar_relato_individual():
         login(c)
         c.post("/encargado/casos", data={"apellido": "DescargaRelato"}, follow_redirects=True)
         rotulo = [x for x in models.listar_casos() if x["apellido"] == "DescargaRelato"][0]["rotulo"]
-        c.post(f"/caso/{rotulo}", data={"nombre": "Ana Torres", "correo": "ana.torres@correo.cl", "relato": "Contenido del primer relato de Ana."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Ana Torres", "correo": "ana.torres@correo.cl", "relato": "Contenido del primer relato de Ana."}, follow_redirects=True)
         import time; time.sleep(0.3)
         relato = models.listar_relatos(rotulo)[0]
 
@@ -701,7 +746,7 @@ def test_notificacion_relato_nuevo():
         n_antes = len(_correos_enviados)
         c.post("/encargado/casos", data={"apellido": "AvisoRelato"}, follow_redirects=True)
         rotulo = [x for x in models.listar_casos() if x["apellido"] == "AvisoRelato"][0]["rotulo"]
-        c.post(f"/caso/{rotulo}", data={"nombre": "Persona Aviso", "correo": "aviso@correo.cl", "relato": "Contenido para aviso."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Persona Aviso", "correo": "aviso@correo.cl", "relato": "Contenido para aviso."}, follow_redirects=True)
         import time; time.sleep(0.3)
 
         avisos = [x for x in _correos_enviados[n_antes:] if x[0] == "marcela@colegio.cl" and "Nuevo relato recibido" in x[1]]
@@ -729,7 +774,7 @@ def test_retencion_configurable():
 
         c.post("/encargado/casos", data={"apellido": "RetencionCorta"}, follow_redirects=True)
         rotulo = [x for x in models.listar_casos() if x["apellido"] == "RetencionCorta"][0]["rotulo"]
-        c.post(f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "retencion@correo.cl", "relato": "Un relato."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Persona R", "correo": "retencion@correo.cl", "relato": "Un relato."}, follow_redirects=True)
         import time; time.sleep(0.3)
         c.get(f"/encargado/casos/{rotulo}/informe.docx")
 
@@ -765,7 +810,7 @@ def test_informe_sin_correo_encargado():
         c.post("/encargado/casos", data={"apellido": "SinCorreo"}, follow_redirects=True)
         casos = [x for x in models.listar_casos() if x["apellido"] == "SinCorreo"]
         rotulo = casos[0]["rotulo"]
-        c.post(f"/caso/{rotulo}", data={"nombre": "Persona X", "correo": "x@correo.cl", "relato": "Un relato cualquiera."}, follow_redirects=True)
+        enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Persona X", "correo": "x@correo.cl", "relato": "Un relato cualquiera."}, follow_redirects=True)
         import time; time.sleep(0.3)
 
         # borramos temporalmente el correo del encargado para simular que nunca lo configuraron
