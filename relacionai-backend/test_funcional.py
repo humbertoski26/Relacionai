@@ -749,9 +749,11 @@ def test_notificacion_relato_nuevo():
         enviar_relato(c, f"/caso/{rotulo}", data={"nombre": "Persona Aviso", "correo": "aviso@correo.cl", "relato": "Contenido para aviso."}, follow_redirects=True)
         import time; time.sleep(0.3)
 
-        avisos = [x for x in _correos_enviados[n_antes:] if x[0] == "marcela@colegio.cl" and "Nuevo relato recibido" in x[1]]
-        check("aviso encargado: se envia un correo al encargado avisando el relato nuevo", len(avisos) == 1)
+        avisos = [x for x in _correos_enviados[n_antes:] if x[0] == "marcela@colegio.cl" and "Comprobante: relato recibido" in x[1]]
+        check("aviso encargado: se envia el comprobante al correo del encargado", len(avisos) == 1)
         check("aviso encargado: el asunto incluye el nombre del colegio", avisos and "[Colegio San Andrés]" in avisos[0][1])
+        creador = [x for x in _correos_enviados[n_antes:] if x[0] == "encargado@relacionai.local" and "Comprobante: relato recibido" in x[1]]
+        check("comprobante: llega tambien a quien creo el caso (solicito el relato)", len(creador) == 1)
 
         historial = models.listar_historial(rotulo)
         check("aviso encargado: el resto del flujo del relato sigue funcionando bien", any("Subió un relato" in h["accion"] for h in historial))

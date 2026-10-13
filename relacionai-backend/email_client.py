@@ -171,16 +171,30 @@ def enviar_informe_encargado(email: str, rotulo: str, apellido: str, docx_bytes:
         return False
 
 
-def enviar_notificacion_relato_nuevo(email: str, rotulo: str, apellido: str, nombre_persona: str, link_caso: str, nombre_colegio: str = "") -> bool:
-    """Avisa al encargado apenas llega un relato nuevo a uno de sus casos, para que no
-    tenga que revisar el panel manualmente para enterarse."""
+def enviar_notificacion_relato_nuevo(email: str, rotulo: str, apellido: str, nombre_persona: str, link_caso: str,
+                                     nombre_colegio: str = "", correo_persona: str = "", numero: str = "",
+                                     fecha_hora: str = "", archivo: str = "", titulo: str = "") -> bool:
+    """Comprobante para el encargado que solicitó el relato: queda como evidencia de la
+    entrega, con los datos generales (sin el contenido del relato, que se revisa en el caso)."""
     prefijo = f"[{nombre_colegio}] " if nombre_colegio else ""
-    asunto = f"{prefijo}Nuevo relato recibido — caso {rotulo}"
+    asunto = f"{prefijo}Comprobante: relato recibido — caso {rotulo}"
+    detalle = [f"Caso: {rotulo} (apellido {apellido})"]
+    if titulo:
+        detalle.append(f"Título del caso: {titulo}")
+    detalle.append(f"Entregado por: {nombre_persona}" + (f" ({correo_persona}, correo verificado con código)" if correo_persona else ""))
+    if fecha_hora:
+        detalle.append(f"Fecha y hora: {fecha_hora}")
+    if numero:
+        detalle.append(f"N° de comprobante: {numero}")
+    detalle.append(f"Forma de entrega: {'archivo ' + archivo if archivo else 'texto escrito o dictado'}")
+    if nombre_colegio:
+        detalle.append(f"Colegio: {nombre_colegio}")
     cuerpo = (
         "Hola,\n\n"
-        f"{nombre_persona} acaba de registrar un relato en el caso {rotulo} (apellido {apellido}).\n\n"
-        f"Puedes revisarlo aquí:\n{link_caso}\n\n"
-        "Gracias."
+        f"Se recibió un relato en el caso {rotulo}. Este correo es el comprobante de la entrega.\n\n"
+        + "\n".join(detalle) + "\n\n"
+        f"Puedes revisar el relato aquí:\n{link_caso}\n\n"
+        "Quien entregó el relato también recibió su comprobante con una copia."
     )
     return _enviar(email, asunto, cuerpo)
 

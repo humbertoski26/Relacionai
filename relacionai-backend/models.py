@@ -250,6 +250,9 @@ _MIGRATIONS = [
     # Preferencia de tema claro/oscuro, sincronizada desde GADUAI al cruzar por el
     # botón del header — null/vacío se interpreta como 'oscuro' (mismo aspecto de hoy).
     ("usuarios", "tema", "TEXT"),
+    # Quién invitó a cada destinatario (id de su cuenta): a esa persona le llega el
+    # comprobante cuando el destinatario entrega su relato.
+    ("destinatarios", "invitado_por_id", "INTEGER"),
 ]
 
 DIAS_RETENCION_DEFECTO = 15
@@ -550,7 +553,7 @@ def pasos_reglamento_de(caso) -> list:
 
 # --------------------------------------------------------------- destinatarios
 
-def agregar_destinatarios(rotulo: str, emails: list, actor: str = "Encargado de convivencia") -> list:
+def agregar_destinatarios(rotulo: str, emails: list, actor: str = "Encargado de convivencia", invitado_por_id=None) -> list:
     """Agrega los correos nuevos (ignora los ya invitados en este caso). Devuelve las filas creadas."""
     caso = obtener_caso(rotulo)
     if not caso:
@@ -575,8 +578,8 @@ def agregar_destinatarios(rotulo: str, emails: list, actor: str = "Encargado de 
                 continue
             row_id = _insertar_y_obtener_id(
                 conn,
-                "INSERT INTO destinatarios (caso_id, email, invitado_en) VALUES (?, ?, ?)",
-                (caso["id"], email, now_iso()),
+                "INSERT INTO destinatarios (caso_id, email, invitado_en, invitado_por_id) VALUES (?, ?, ?, ?)",
+                (caso["id"], email, now_iso(), invitado_por_id),
             )
             creados.append(conn.execute("SELECT * FROM destinatarios WHERE id = ?", (row_id,)).fetchone())
 
@@ -956,6 +959,39 @@ def crear_usuario(nombre: str, email: str, password: str, es_admin: bool = False
         )
         fila = conn.execute("SELECT * FROM usuarios WHERE id = ?", (usuario_id,)).fetchone()
     return _fila_usuario_a_dict(fila)
+
+
+def correos_para_comprobante(rotulo: str, correo_persona: str) -> list:
+    """A quién le llega el comprobante de un relato entregado, además de a quien lo entregó:
+    la cuenta que invitó a esa persona; si no fue invitada por correo (link compartido), quien
+    creó el caso; y siempre el correo del encargado definido en Configuración."""
+    caso = obtener_caso(rotulo)
+    if not caso:
+        return []
+    correos = []
+    with get_conn() as conn:
+        fila = conn.execute(
+            "SELECT u.email FROM destinatarios d JOIN usuarios u ON u.id = d.invitado_por_id "
+            "WHERE d.caso_id = ? AND LOWER(d.email) = LOWER(?) AND u.activo = 1 ORDER BY d.id DESC LIMIT 1",
+            (caso["id"], (correo_persona or "").strip()),
+        ).fetchone()
+        if fila and fila["email"]:
+            correos.append(fila["email"])
+        if not correos and caso["creado_por"]:
+            fila = conn.execute(
+                "SELECT email FROM usuarios WHERE nombre = ? AND activo = 1 ORDER BY id LIMIT 1",
+                (caso["creado_por"],),
+            ).fetchone()
+            if fila and fila["email"]:
+                correos.append(fila["email"])
+        config = conn.execute("SELECT correo_encargado FROM configuracion WHERE id = 1").fetchone()
+        if config and config["correo_encargado"]:
+            correos.append(config["correo_encargado"])
+    vistos, unicos = set(), []
+    for c in correos:
+        if c.lower() not in vistos:
+            vistos.add(c.lower()); unicos.append(c)
+    return unicos
 
 
 def listar_usuarios() -> list:

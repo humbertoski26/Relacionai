@@ -454,12 +454,16 @@ def _procesar_relato_en_segundo_plano(rotulo: str, relato_id: int, contenido: st
     try:
         caso = models.obtener_caso(rotulo)
         config = models.obtener_configuracion()
-        correo_encargado = config["correo_encargado"] if config else None
-        if caso and correo_encargado:
-            nombre_colegio = (config["nombre_colegio"] if config else "") or ""
-            enviar_notificacion_relato_nuevo(correo_encargado, rotulo, caso["apellido"], nombre, link_caso_privado, nombre_colegio=nombre_colegio)
+        nombre_colegio = ((config["nombre_colegio"] if config else "") or "")
+        # Comprobante para quien solicitó el relato (y el correo del encargado de Configuración).
+        for correo_encargado in (models.correos_para_comprobante(rotulo, correo) if caso else []):
+            enviar_notificacion_relato_nuevo(
+                correo_encargado, rotulo, caso["apellido"], nombre, link_caso_privado,
+                nombre_colegio=nombre_colegio, correo_persona=correo, numero=f"{rotulo}-{relato_id}",
+                fecha_hora=fecha_hora, archivo=archivo_original or "", titulo=(caso["titulo"] or ""),
+            )
     except Exception:
-        app.logger.exception("Error avisando al encargado del nuevo relato en el caso %s", rotulo)
+        app.logger.exception("Error enviando el comprobante del relato al encargado en el caso %s", rotulo)
 
 
 def _sintetizar_en_segundo_plano(rotulo: str):
@@ -931,7 +935,7 @@ def encargado_agregar_destinatarios(rotulo):
     if mensaje:
         models.guardar_mensaje_invitacion(rotulo, mensaje)
 
-    nuevos = models.agregar_destinatarios(rotulo, emails, actor=actor_encargado())
+    nuevos = models.agregar_destinatarios(rotulo, emails, actor=actor_encargado(), invitado_por_id=session.get("usuario_id"))
     if not nuevos:
         flash("No se agregó ningún correo nuevo (revisa que estén bien escritos, o si ya estaban invitados).", "error")
         return redirect(url_for("encargado_caso", rotulo=rotulo))
